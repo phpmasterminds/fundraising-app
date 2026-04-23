@@ -1,0 +1,1234 @@
+.view-event-page {
+    --background: #EEF4F4;
+}
+
+
+/* ── Container ── */
+
+.ve-container {
+    padding: 20px 20px 130px;
+}
+
+
+/* ── Header ── */
+
+.ve-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.ve-back-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.ve-back-btn img {
+    width: 16px;
+}
+
+.ve-header-right {
+    display: flex;
+    gap: 10px;
+}
+
+.ve-icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: background 0.2s;
+}
+
+.ve-icon-btn--active {
+    background: #2BA7A0;
+}
+
+.ve-icon-btn img {
+    width: 18px;
+}
+
+
+/* ── Event Info Card ── */
+
+.ve-event-info {
+    background: #fff;
+    border-radius: 20px;
+    padding: 18px 16px 18px;
+    margin-bottom: 14px;
+}
+
+.ve-live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #2BA7A0;
+    margin-bottom: 6px;
+}
+
+.ve-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2BA7A0;
+}
+
+.ve-event-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin: 0 0 4px;
+}
+
+.ve-event-org {
+    font-size: 13px;
+    color: #9AA0A6;
+    margin: 0;
+}
+
+
+/* ── Controls Panel ── */
+
+.ve-controls-panel {
+    background: transparent;
+    border-top: 1px solid #F0F1F4;
+    padding: 0;
+    margin-bottom: 0;
+}
+
+.ve-controls-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin: 14px 0 4px;
+}
+
+.ve-control-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+}
+
+.ve-control-label-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ve-control-icon {
+    font-size: 15px;
+    color: #9AA0A6;
+}
+
+.ve-control-label {
+    font-size: 14px;
+    color: #1A1A2E;
+}
+
+.ve-control-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-control-chip {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1A1A2E;
+    background: #fff;
+    border: 1px solid #E5E7EB;
+    border-radius: 20px;
+    padding: 4px 14px;
+}
+
+.ve-control-divider {
+    height: 1px;
+    background: #F0F1F4;
+}
+
+
+/* Toggle */
+
+.ve-toggle {
+    width: 44px;
+    height: 26px;
+    border-radius: 13px;
+    background: #D1D5DB;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.25s;
+}
+
+.ve-toggle--on {
+    background: #2BA7A0;
+}
+
+.ve-toggle-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.25s;
+}
+
+.ve-toggle--on .ve-toggle-knob {
+    transform: translateX(18px);
+}
+
+
+/* ── Stats Row ── */
+
+.ve-stats-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    margin-bottom: 14px;
+}
+
+.ve-stat-card {
+    flex: 1;
+    background: #F9FAFB;
+    border-radius: 16px;
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border: 1px solid #F0F1F4;
+}
+
+.ve-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin: 0;
+}
+
+.ve-stat-label {
+    font-size: 11px;
+    color: #9AA0A6;
+    margin: 0;
+}
+
+
+/* ── Progress Bar ── */
+
+.ve-progress-card {
+    padding: 14px 0 2px;
+}
+
+.ve-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.ve-progress-label {
+    font-size: 12px;
+    color: #9AA0A6;
+}
+
+.ve-progress-amount {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-progress-track {
+    width: 100%;
+    height: 8px;
+    background: #EEF1F4;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.ve-progress-fill {
+    height: 100%;
+    background: #2BA7A0;
+    border-radius: 10px;
+}
+
+.ve-progress-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #9AA0A6;
+}
+
+
+/* ── Alert Banner ── */
+
+.ve-alert-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #FFF8EE;
+    border: 1.5px solid #F4A43A;
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 20px;
+    cursor: pointer;
+}
+
+.ve-alert-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ve-alert-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1A1A2E;
+}
+
+.ve-alert-chevron {
+    font-size: 20px;
+    color: #9AA0A6;
+    flex-shrink: 0;
+}
+
+
+/* ── Round Header ── */
+
+.ve-round-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.ve-round-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+.ve-round-timer {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #F4A43A;
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.ve-round-complete {
+    margin-left: auto;
+    font-size: 12px;
+    color: #9AA0A6;
+}
+
+
+/* ── Group Grid ── */
+
+.ve-group-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 30px;
+}
+
+.ve-group-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    border: 1.5px solid #F1F2F6;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.ve-group-card:active {
+    transform: scale(0.97);
+}
+
+.ve-group-card.teal-border {
+    border-color: #2BA7A0;
+    background: #F5FAFA;
+}
+
+.ve-group-card.orange-border {
+    border-color: #F4A43A;
+    background: #FFFBF5;
+}
+
+.ve-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.ve-group-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-bid-dots {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.ve-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #E0E0E0;
+}
+
+.ve-dot.filled-teal {
+    background: #2BA7A0;
+}
+
+.ve-dot.filled-orange {
+    background: #F4A43A;
+}
+
+.ve-group-bids {
+    font-size: 11px;
+    color: #9AA0A6;
+    margin-bottom: 4px;
+}
+
+.ve-group-min {
+    font-size: 11px;
+    font-weight: 600;
+    color: #2BA7A0;
+}
+
+.ve-group-alert {
+    font-size: 11px;
+    font-weight: 500;
+    color: #F4A43A;
+}
+
+
+/* ── Bottom Actions ── */
+
+.ve-bottom-area {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 20px 32px;
+    background: linear-gradient(to top, #EEF4F4 70%, transparent);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    z-index: 10;
+}
+
+.ve-launch-btn {
+    width: 100%;
+    background: #F4A43A;
+    padding: 16px;
+    text-align: center;
+    border-radius: 30px;
+    font-weight: 700;
+    font-size: 16px;
+    color: #fff;
+    box-shadow: 0 6px 15px rgba(244, 164, 58, 0.35);
+    cursor: pointer;
+}
+
+.ve-end-btn {
+    font-size: 13px;
+    color: #9AA0A6;
+    cursor: pointer;
+}
+
+
+/* ══════════════════════════════════
+   Sheet Base
+══════════════════════════════════ */
+
+.ve-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 50;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.ve-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border-radius: 24px 24px 0 0;
+    padding: 12px 20px 32px;
+    z-index: 60;
+    animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    overflow-y: auto;
+    max-height: 92vh;
+}
+
+.ve-sheet--full {
+    top: 0;
+    border-radius: 0;
+    padding-top: 0;
+    max-height: 100vh;
+}
+
+.ve-sheet--white {
+    background: #fff;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+.ve-sheet-handle {
+    width: 40px;
+    height: 4px;
+    background: #D1D5DB;
+    border-radius: 4px;
+    margin: 0 auto 20px;
+}
+
+
+/* Topbar for full sheets */
+
+.ve-sheet-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0px 16px;
+    border-bottom: 1px solid #F1F2F6;
+    margin-bottom: 4px;
+}
+
+.ve-sheet-topbar--white {
+    background: #fff;
+}
+
+.ve-sheet-topbar-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+.ve-active-badge {
+    background: #2BA7A0;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 20px;
+    padding: 5px 14px;
+}
+
+.ve-sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.ve-sheet-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin: 0;
+}
+
+.ve-sheet-badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 20px;
+}
+
+.badge-bidding {
+    background: #F4A43A;
+    color: #fff;
+}
+
+.badge-done {
+    background: #2BA7A0;
+    color: #fff;
+}
+
+.badge-waiting {
+    background: #EEF1F4;
+    color: #9AA0A6;
+}
+
+.ve-sheet-close {
+    width: 100%;
+    background: #F1F2F6;
+    padding: 16px;
+    text-align: center;
+    border-radius: 30px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1A1A2E;
+    cursor: pointer;
+}
+
+
+/* ══════════════════════════════════
+   QR Sheet
+══════════════════════════════════ */
+
+.ve-qr-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin: 20px 20px 12px;
+}
+
+.ve-qr-box {
+    margin: 0 20px;
+    background: #F9FAFB;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    position: relative;
+    min-height: 220px;
+}
+
+.ve-qr-share-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid #E5E7EB;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+}
+
+.ve-qr-share-btn--sm {
+    position: static;
+    flex-shrink: 0;
+}
+
+.ve-join-link-box {
+    margin: 0 20px;
+    background: #F9FAFB;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.ve-join-link-text {
+    font-size: 12px;
+    color: #2BA7A0;
+    flex: 1;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+.ve-qr-divider {
+    height: 1px;
+    background: #F0F1F4;
+    margin: 24px 20px;
+}
+
+.ve-config-field {
+    margin: 0 20px 16px;
+}
+
+.ve-config-label {
+    font-size: 12px;
+    color: #9AA0A6;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.ve-config-input {
+    width: 100%;
+    background: #F9FAFB;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 14px;
+    color: #1A1A2E;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.ve-config-input:focus {
+    border-color: #2BA7A0;
+}
+
+
+/* ══════════════════════════════════
+   All Donors Sheet
+══════════════════════════════════ */
+
+.ve-all-donors-list {
+    padding: 0px;
+}
+
+.ve-donor-group-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2BA7A0;
+    padding: 16px 0 8px;
+}
+
+.ve-all-donor-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 0;
+    border-bottom: 1px solid #F1F2F6;
+}
+
+.ve-all-donor-row:last-child {
+    border-bottom: none;
+}
+
+.ve-all-donor-amounts {
+    display: flex;
+    gap: 12px;
+    margin-left: auto;
+}
+
+.ve-all-donor-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    min-width: 70px;
+}
+
+.ve-all-donor-col-label {
+    font-size: 10px;
+    color: #9AA0A6;
+    white-space: nowrap;
+}
+
+.ve-all-donor-col-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-donor-bidding-orange {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F4A43A;
+}
+
+.ve-left-event-chip {
+    font-size: 11px;
+    font-weight: 500;
+    background: #F1F2F6;
+    color: #9AA0A6;
+    border-radius: 20px;
+    padding: 3px 10px;
+    white-space: nowrap;
+}
+
+
+/* ── Donor List (Group detail sheet) ── */
+
+.ve-donor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 24px;
+}
+
+.ve-donor-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid #F1F2F6;
+}
+
+.ve-donor-row:last-child {
+    border-bottom: none;
+}
+
+.ve-donor-avatar {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 600;
+    color: #2BA7A0;
+}
+
+.ve-donor-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.ve-donor-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-donor-sub {
+    font-size: 12px;
+    color: #9AA0A6;
+}
+
+.ve-donor-right {
+    text-align: right;
+}
+
+.ve-donor-bid {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2BA7A0;
+}
+
+.ve-donor-bidding {
+    font-size: 13px;
+    color: #C5C8CC;
+}
+
+.ve-donor-remove {
+    font-size: 18px;
+    color: #FFBCBC;
+    cursor: pointer;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+
+/* ══════════════════════════════════
+   Live Summary Sheet
+══════════════════════════════════ */
+
+.ve-ls-body {
+    padding: 20px 20px 0;
+}
+
+.ve-ls-event-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #F2F3F5;
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1A1A2E;
+    margin-bottom: 16px;
+}
+
+.ve-ls-event-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1A1A2E;
+}
+
+.ve-ls-amount {
+    font-size: 42px;
+    font-weight: 700;
+    color: #1A1A2E;
+    line-height: 1.1;
+    margin-bottom: 6px;
+}
+
+.ve-ls-org {
+    font-size: 13px;
+    color: #9AA0A6;
+    margin-bottom: 14px;
+}
+
+.ve-ls-meta {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 28px;
+}
+
+.ve-ls-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: #9AA0A6;
+}
+
+.ve-ls-section-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1A1A2E;
+    margin-bottom: 12px;
+}
+
+
+/* Milestones */
+
+.ve-ls-milestones {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 28px;
+}
+
+.ve-ls-milestone {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #fff;
+    border: 1.5px solid #F0F1F4;
+    border-radius: 14px;
+    padding: 14px 16px;
+}
+
+.ve-ls-milestone--reached {
+    border-color: #2BA7A0;
+    background: #F0FAFA;
+}
+
+.ve-ls-milestone-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #F1F2F6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.ve-ls-milestone-icon.reached {
+    background: #2BA7A0;
+}
+
+.ve-ls-milestone-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1A1A2E;
+    flex: 1;
+}
+
+.ve-ls-milestone-text.reached {
+    color: #1A1A2E;
+}
+
+.ve-ls-reached-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2BA7A0;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+
+/* Leaderboard */
+
+.ve-ls-leaderboard {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.ve-ls-lb-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid #F1F2F6;
+}
+
+.ve-ls-lb-row:last-child {
+    border-bottom: none;
+}
+
+.ve-ls-lb-rank {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #F1F2F6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1A1A2E;
+    flex-shrink: 0;
+}
+
+.ve-ls-lb-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ve-ls-lb-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1A1A2E;
+}
+
+.ve-ls-lb-sub {
+    font-size: 12px;
+    color: #9AA0A6;
+}
+
+.ve-ls-lb-total {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+
+/* ══════════════════════════════════
+   Round Overview Sheet
+══════════════════════════════════ */
+
+.ve-ro-sheet {
+    padding-bottom: 32px;
+}
+
+.ve-ro-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.ve-ro-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+
+/* Tab bars (progress-bar style) */
+
+.ve-ro-tab-bars {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.ve-ro-tab-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 4px;
+    background: #E8EAED;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.ve-ro-tab-bar.active {
+    background: #2BA7A0;
+}
+
+
+/* Tab labels */
+
+.ve-ro-tab-labels {
+    display: flex;
+    margin-bottom: 16px;
+}
+
+.ve-ro-tab-label {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 6px 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #9AA0A6;
+    cursor: pointer;
+    text-align: center;
+}
+
+.ve-ro-tab-label.active {
+    color: #2BA7A0;
+    font-weight: 700;
+}
+
+
+/* Round card */
+
+.ve-ro-card {
+    background: #fff;
+    border: 1.5px solid #F0F1F4;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.ve-ro-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.ve-ro-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+
+/* Round status badges */
+
+.ve-ro-badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 20px;
+}
+
+.ve-ro-badge--complete {
+    background: #E8F8F7;
+    color: #2BA7A0;
+}
+
+.ve-ro-badge--bidding {
+    background: #FFF3E0;
+    color: #F4A43A;
+}
+
+.ve-ro-badge--not-started {
+    background: #F1F2F6;
+    color: #9AA0A6;
+}
+
+.ve-ro-divider {
+    height: 1px;
+    background: #F0F1F4;
+    margin: 0 0 14px;
+}
+
+
+/* Stats row inside card */
+
+.ve-ro-stats {
+    display: flex;
+    gap: 0;
+    margin-bottom: 14px;
+}
+
+.ve-ro-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ve-ro-stat-label {
+    font-size: 11px;
+    color: #9AA0A6;
+}
+
+.ve-ro-stat-val {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1A1A2E;
+}
+
+.ve-ro-stat-val--alert {
+    color: #F4A43A;
+}
+
+
+/* Group rows inside card */
+
+.ve-ro-group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.ve-ro-group-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid #F5F6F8;
+}
+
+.ve-ro-group-row:last-child {
+    border-bottom: none;
+}
+
+.ve-ro-group-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ve-ro-group-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1A1A2E;
+}
+
+.ve-ro-group-detail {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.padding-bttom-0 {
+    padding-bottom: 20px;
+}
+
+.bg-white {
+    background: #fff;
+}

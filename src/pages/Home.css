@@ -1,0 +1,143 @@
+.home {
+  --background: #f6f7f9;
+  padding: 20px;
+  text-align: center;
+}
+
+/* Logo */
+.logo-box img {
+  width: 72px;
+  height: 72px;
+  margin-top: 50px;
+}
+
+/* Title */
+.title {
+  font-size: 28px;
+  font-weight: 600;
+  margin-top: 12px;
+  color: #1c1c1c;
+}
+
+/* Subtitle */
+.subtitle {
+  font-size: 14px;
+  color: #8a8a8a;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+/* Cards */
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 50px;
+  padding: 14px 18px;
+  margin-top: 16px;
+  transition: 0.2s;
+}
+
+/* Host */
+.host {
+  border: 2px solid #f59e0b;
+  background: #fdf6ec;
+}
+
+/* Donor */
+.donor {
+  border: 2px solid #2aa198;
+  background: #e8f6f4;
+}
+
+/* Icon */
+.icon-circle {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #f1f1f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-circle img {
+  width: 22px;
+}
+
+/* Text */
+.card-text {
+  flex: 1;
+  margin-left: 14px;
+  text-align: left;
+}
+
+.card-text h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.card-text p {
+  font-size: 13px;
+  color: #7a7a7a;
+  margin-top: 2px;
+}
+
+/* Arrow */
+.arrow {
+  font-size: 18px;
+  color: #444;
+}
+
+/* Join */
+.join-title {
+  margin-top: 28px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* Input row */
+.join-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* Input */
+.input {
+  background: #ededed;
+  border-radius: 25px;
+  padding-left: 15px;
+  height: 45px;
+}
+
+/* Join button */
+.join-btn {
+  --background: #f59e0b;
+  --border-radius: 25px;
+  height: 45px;
+  font-weight: 500;
+}
+
+/* Divider */
+.join-row::after {
+  content: '';
+  display: block;
+  height: 1px;
+  background: #ddd;
+  width: 100%;
+  position: absolute;
+  margin-top: 60px;
+}
+
+/* QR Button */
+.qr-btn {
+  margin-top: 25px;
+  height: 50px;
+  --border-radius: 30px;
+  --background: linear-gradient(135deg, #2aa198, #3bb7a9);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}

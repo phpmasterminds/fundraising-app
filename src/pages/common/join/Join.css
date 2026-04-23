@@ -1,0 +1,201 @@
+.join-page {
+    --background: #fff;
+}
+
+
+/* Container = fixes alignment perfectly */
+
+.container {
+    margin: 0 auto;
+    padding: 40px 20px 20px;
+    text-align: center;
+}
+
+
+/* Logo */
+
+.logo-circle {
+    width: 46px;
+    height: 46px;
+    background: #F4A43A;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 20px auto 15px;
+    box-shadow: 0 4px 10px rgba(244, 164, 58, 0.25);
+}
+
+.logo-circle img {
+    width: 46px;
+}
+
+
+/* Typography */
+
+.title {
+    font-size: 24px;
+    font-weight: 400;
+    margin: 10px 0 6px;
+}
+
+.subtitle {
+    font-size: 16px;
+    color: #7a7a7a;
+    line-height: 125%;
+    margin-bottom: 30px;
+}
+
+
+/* Cards */
+
+.card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 11px 9px;
+    border-radius: 999px;
+    margin: 14px 0;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+
+/* Press effect (important mobile feel) */
+
+.card:active {
+    transform: scale(0.97);
+}
+
+
+/* Left content */
+
+.left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    text-align: left;
+}
+
+.icon-wrap {
+    width: 60px;
+    height: 60px;
+    background: #EFEFEF;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-wrap img {
+    width: 60px;
+}
+
+
+/* Text inside cards */
+
+.card h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+}
+
+.card p {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: #6f6f6f;
+}
+
+
+/* Host */
+
+.host {
+    border: 1.8px solid #F4A43A;
+    background: #FFF5EA;
+}
+
+
+/* Donor */
+
+.donor {
+    border: 1.8px solid #2FA39A;
+    background: #E6F4F2;
+}
+
+
+/* Arrow */
+
+.arrow {
+    width: 20px;
+    opacity: 1;
+}
+
+
+/* Join Section */
+
+.join-section {
+    margin-top: 50px;
+}
+
+.join-section span {
+    font-size: 14px;
+    color: #000;
+    font-weight: 500;
+}
+
+
+/* Join box */
+
+.join-box {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.join-box input {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 25px;
+    border: 1px solid #F1F2F6;
+    background: #F8F9FB;
+    font-size: 14px;
+    outline: none;
+}
+
+
+/* Join button */
+
+.join-box button {
+    background: #F4A43A;
+    border: 1px solid #C5821F;
+    padding: 10px 18px;
+    border-radius: 25px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+
+/* QR Button */
+
+.qr-btn {
+    margin-top: 20px;
+    background: #2BA7A0;
+    border: 1px solid #16837E;
+    color: white;
+    padding: 14px;
+    border-radius: 30px;
+    font-weight: 500;
+    font-size: 14px;
+    transition: transform 0.15s ease;
+}
+
+.qr-btn:active {
+    transform: scale(0.97);
+}
+
+.bottom-section {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    right: 20px;
+}

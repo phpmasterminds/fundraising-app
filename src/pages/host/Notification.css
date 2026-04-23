@@ -1,0 +1,109 @@
+.notification-page {
+    --background: #fff;
+}
+
+.notif-container {
+    padding: 20px;
+}
+
+
+/* ── Header ── */
+
+.notif-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-bottom: 28px;
+}
+
+.notif-back-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #F4F5F7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: absolute;
+    left: 0;
+}
+
+.notif-back-btn img {
+    width: 16px;
+}
+
+.notif-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: #1A1A2E;
+    margin: 0;
+}
+
+
+/* ── Section Label ── */
+
+.notif-section-label {
+    font-size: 10px;
+    color: #ccc;
+    font-weight: 400;
+    margin-bottom: 10px;
+}
+
+
+/* ── Notification Card ── */
+
+.notif-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid #EAEAEA;
+    border-radius: 14px;
+    padding: 14px 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    background: #fff;
+}
+
+.notif-card.notif-card--alert {
+    border-color: #FCB040;
+}
+
+.notif-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+}
+
+.notif-card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #25201D;
+}
+
+.notif-card-sub {
+    font-size: 12px;
+    color: #CCCCCC;
+    font-weight: 400;
+}
+
+.notif-card-time {
+    font-size: 11px;
+    color: #CCCCCC;
+}
+
+.notif-chevron {
+    font-size: 18px;
+    color: #CCCCCC;
+    margin-left: 10px;
+    flex-shrink: 0;
+}
+
+
+/* ── Spacer between sections ── */
+
+.notif-section-gap {
+    height: 16px;
+}

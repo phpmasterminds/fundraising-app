@@ -1,0 +1,202 @@
+.register-page {
+    --background: #fff;
+    font-family: 'Outfit', sans-serif;
+}
+
+
+/* Container */
+
+.container {
+    max-width: 380px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+
+/* Back */
+
+.back-btn {
+    width: 42px;
+    height: 42px;
+    background: #f2f2f2;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* Profile */
+
+.profile {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.avatar {
+    width: 64px;
+    height: 64px;
+    background: #f2f2f2;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.avatar img {
+    width: 80px;
+}
+
+.profile span {
+    color: #2FA39A;
+    font-weight: 500;
+}
+
+
+/* Form */
+
+.form-area {
+    margin-top: 20px;
+    padding-bottom: 120px;
+}
+
+
+/* Inputs */
+
+.input-group {
+    margin-top: 20px;
+}
+
+.input-group label {
+    font-size: 13px;
+    color: #76716E;
+}
+
+.input-box {
+    margin-top: 8px;
+    background: #F8F9FB;
+    border: 1px solid #E5E7EB;
+    border-radius: 40px;
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    gap: 12px;
+}
+
+.input-box img {
+    width: 18px;
+    opacity: 0.6;
+}
+
+.input-box input {
+    border: none;
+    background: transparent;
+    flex: 1;
+    font-size: 14px;
+    outline: none;
+    color: #25201D;
+}
+
+
+/* Eye */
+
+.eye {
+    width: 18px;
+}
+
+
+/* Bottom */
+
+.bottom {
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    max-width: 380px;
+    margin: auto;
+    padding: 0 20px;
+}
+
+
+/* Button */
+
+.primary-btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: 40px;
+    font-size: 16px;
+    font-weight: 600;
+    box-shadow: 0 8px 18px rgba(244, 164, 58, 0.35);
+}
+
+
+/* Host */
+
+.primary-btn.host {
+    background: #FCB040;
+    border: 1px solid #C5821F;
+    color: #25201D;
+}
+
+
+/* Donor */
+
+.primary-btn.donor {
+    background: #2FA39A;
+    color: #fff;
+}
+
+
+/* Secondary */
+
+.secondary {
+    text-align: center;
+    margin-top: 10px;
+    color: #A0A0A0;
+}
+
+.title {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #8a8a8a;
+    margin-top: 6px;
+}
+
+.upload-text {
+    color: #2FA39A;
+    font-weight: 500;
+}
+
+.optional {
+    font-size: 12px;
+    color: #999;
+}
+
+.hint {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 6px;
+}
+
+.center {
+    text-align: center;
+}
+
+.random-name {
+    margin-top: 10px;
+    text-align: center;
+    background: #eee;
+    padding: 8px;
+    border-radius: 20px;
+    font-size: 12px;
+    color: #999;
+}
