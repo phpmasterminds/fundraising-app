@@ -1,0 +1,77 @@
+/* ── Shared Donor Header ─────────────────────────── */
+
+.dh-header {
+	display: flex;
+	align-items: center;
+	height: 64px;
+	margin-top: env(safe-area-inset-top);
+	position: relative;
+}
+
+/* ── MAIN variant (logo + username) ── */
+.dh-main {
+  justify-content: space-between;
+}
+
+.dh-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.dh-logo img {
+  width: 20px;
+  margin-top: 3px;
+}
+
+.dh-logo span {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.dh-username {
+  font-size: 14px;
+  font-weight: 500;
+  color: #25201D;
+  cursor: pointer;
+}
+
+/* ── BACK variant (back btn + title + right slot) ── */
+.dh-back {
+  position: relative;
+  justify-content: flex-start;
+}
+
+.dh-back-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dh-back-btn img {
+  width: 20px;
+  height: 20px;
+}
+
+.dh-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  font-weight: 600;
+  color: #25201D;
+  white-space: nowrap;
+}
+
+.dh-right {
+  font-size: 14px;
+  font-weight: 500;
+  color: #76716E;
+  cursor: pointer;
+  margin-left: auto;
+}

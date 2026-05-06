@@ -1,0 +1,85 @@
+/* ── Shared Host Header ─────────────────────────── */
+
+.hh-header {
+  display: flex;
+	align-items: center;
+	height: 64px;
+	margin-top: env(safe-area-inset-top);
+	position: relative;
+}
+
+/* ── MAIN variant (logo + right actions) ── */
+.hh-main {
+  justify-content: space-between;
+}
+
+.hh-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.hh-logo img {
+  width: 20px;
+  margin-top: 3px;
+}
+
+.hh-logo span {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+/* ── BACK variant ── */
+.hh-back {
+  position: relative;
+  justify-content: flex-start;
+}
+
+.hh-back-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hh-back-btn img {
+  width: 20px;
+  height: 20px;
+}
+
+.hh-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  font-weight: 600;
+  color: #25201D;
+  white-space: nowrap;
+}
+
+.hh-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.hh-bell-wrap {
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.hh-avatar-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1.5px solid #FCB040;
+}

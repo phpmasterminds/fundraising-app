@@ -22,7 +22,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 20px auto 15px;
+    margin: 40px auto 5px;
     box-shadow: 0 4px 10px rgba(244, 164, 58, 0.25);
 }
 
@@ -33,15 +33,15 @@
 
 /* Typography */
 
-.title {
+.join-page .title {
     font-size: 24px;
     font-weight: 400;
-    margin: 10px 0 6px;
+    margin: 5px 0 6px;
 }
 
-.subtitle {
+.join-page .subtitle {
     font-size: 16px;
-    color: #7a7a7a;
+    color: #ccc;
     line-height: 125%;
     margin-bottom: 30px;
 }
@@ -99,10 +99,11 @@
     font-weight: 500;
 }
 
-.card p {
+.host p,
+.donor p {
     margin: 2px 0 0;
-    font-size: 13px;
-    color: #6f6f6f;
+    font-size: 14px;
+    color: #CCC;
 }
 
 
@@ -111,6 +112,7 @@
 .host {
     border: 1.8px solid #F4A43A;
     background: #FFF5EA;
+    margin: 10px 0;
 }
 
 
@@ -119,6 +121,7 @@
 .donor {
     border: 1.8px solid #2FA39A;
     background: #E6F4F2;
+    margin: 10px 0;
 }
 
 
@@ -127,6 +130,7 @@
 .arrow {
     width: 20px;
     opacity: 1;
+    margin-right: 10px;
 }
 
 
@@ -134,6 +138,9 @@
 
 .join-section {
     margin-top: 50px;
+    max-width: 94%;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .join-section span {
@@ -170,7 +177,8 @@
     border: 1px solid #C5821F;
     padding: 10px 18px;
     border-radius: 25px;
-    font-weight: 600;
+    font-weight: 500;
+    color: #25201D;
     font-size: 14px;
 }
 
@@ -187,6 +195,9 @@
     font-weight: 500;
     font-size: 14px;
     transition: transform 0.15s ease;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 95%;
 }
 
 .qr-btn:active {

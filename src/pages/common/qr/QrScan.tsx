@@ -5,10 +5,14 @@ import {
 import { useIonRouter } from '@ionic/react';
 import { useEffect } from 'react';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
+import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './QrScan.css';
 
 const QrScan: React.FC = () => {
   const router = useIonRouter();
+  
+  const { checking } = useAuthRedirect();
+  if (checking) return null;
 
   useEffect(() => {
     startScan();

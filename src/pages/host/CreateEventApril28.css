@@ -9,10 +9,9 @@
 
 /* Header */
 
-.create-page .header {
+.header {
     display: flex;
     position: relative;
-	justify-content: center;
 }
 
 .back {
@@ -45,7 +44,6 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    margin-top: 0px !important;
 }
 
 .avatar-circle img {
@@ -55,10 +53,10 @@
 
 /* Inputs */
 
-.create-page label {
+label {
     display: block;
     font-size: 14px;
-    color: #CCCCCC;
+    color: #999;
     margin-top: 14px;
     text-align: left;
 }
@@ -70,9 +68,6 @@
     border: none;
     background: #F5F6F8;
     margin-top: 6px;
-    font-size: 15px;
-    font-weight: 400px;
-    ;
 }
 
 
@@ -99,12 +94,11 @@
     background: #F5F6F8;
     margin-top: 6px;
     font-size: 14px;
-    color: #ccc;
+    color: #999;
 }
 
 .fake-input img {
     width: 16px;
-    margin-right: 5px;
 }
 
 
@@ -116,13 +110,13 @@
     justify-content: space-between;
     background: #F5F6F8;
     border-radius: 30px;
-    padding: 4px;
+    padding: 10px;
     margin-top: 6px;
 }
 
 .round-box button {
-    width: 48px;
-    height: 48px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     border: none;
     background: #ddd;
@@ -133,37 +127,15 @@
     color: #fff;
 }
 
-.avatar-section span {
-    font-size: 14px;
-    color: #2BA7A0;
-    font-weight: 400;
-}
-
 
 /* Upload */
 
 .upload-box {
     margin-top: 10px;
-    padding: 16px;
+    padding: 20px;
     border-radius: 12px;
     background: #F5F6F8;
-    text-align: center !important;
-}
-
-.upload-box img {
-    width: 18px;
-}
-
-.upload-box p {
-    margin: 0px;
-    font-size: 14px;
-    font-weight: 400;
-}
-
-.upload-box small {
-    font-size: 10px;
-    color: #ccc;
-    margin-top: 6px;
+    text-align: center;
 }
 
 
@@ -172,21 +144,16 @@
 .create-btn {
     width: 100%;
     margin-top: 30px;
-    padding: 16px;
+    padding: 14px;
     border-radius: 30px;
-    background: #F1F2F6;
-    font-size: 18px;
-    font-weight: 600;
+    background: #E0E0E0;
     border: none;
-    color: #CCC;
 }
 
 .cancel {
     text-align: center;
     margin-top: 10px;
-    color: #ccc;
-    font-size: 14px;
-    font-weight: 400;
+    color: #999;
 }
 
 
@@ -208,13 +175,4 @@
 .picker-header h3 {
     margin: 0;
     font-size: 16px;
-}
-
-.create-page input::placeholder {
-    color: #CCCCCC;
-    opacity: 1;
-}
-
-.gap-20 {
-    gap: 20px;
 }

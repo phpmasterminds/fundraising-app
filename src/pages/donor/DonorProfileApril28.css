@@ -1,0 +1,292 @@
+* {
+    box-sizing: border-box;
+}
+
+.profile-page {
+    --background: #fff;
+    font-family: 'Outfit', sans-serif;
+}
+
+
+/* Container */
+
+.container {
+    max-width: 380px;
+    margin: 0 auto;
+    padding: 16px 20px 0;
+}
+
+
+/* ================= HEADER ================= */
+
+.header {
+    position: relative;
+    height: 64px;
+    margin-top: env(safe-area-inset-top);
+}
+
+
+/* Back */
+
+.dback-btn {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 42px;
+    height: 42px;
+    background: #F2F2F2;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0px;
+}
+
+
+/* Title */
+
+.header-title {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 17px;
+    font-weight: 600;
+}
+
+
+/* Logout */
+
+.logout {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 14px;
+    color: #FF3B30;
+}
+
+
+/* Subtitle */
+
+.subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #8E8E93;
+    margin-top: 6px;
+}
+
+
+/* ================= PROFILE ================= */
+
+.profile {
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.avatar {
+    width: 60px;
+    height: 60px;
+    background: #F2F2F2;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+.preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.upload {
+    color: #2FA39A;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.optional {
+    font-size: 12px;
+    color: #A0A0A0;
+}
+
+
+/* ================= FORM ================= */
+
+.input-group {
+    margin-top: 18px;
+}
+
+.input-group label {
+    font-size: 13px;
+    color: #8E8E93;
+}
+
+.input-box {
+    margin-top: 6px;
+    background: #F2F2F2;
+    border-radius: 999px;
+    padding: 14px 16px;
+}
+
+.input-box input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+    color: #1D1D1D;
+    outline: none;
+}
+
+small {
+    font-size: 11px;
+    color: #B0B0B0;
+    margin-top: 6px;
+}
+
+.random {
+    margin-top: 10px;
+    text-align: center;
+    background: #EFEFEF;
+    padding: 8px;
+    border-radius: 20px;
+    font-size: 12px;
+    color: #9A9A9A;
+}
+
+.center {
+    text-align: center;
+}
+
+
+/* ================= BUTTON ================= */
+
+.bottom {
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    max-width: 380px;
+    margin: auto;
+    padding: 0 20px;
+}
+
+.btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: 40px;
+    font-size: 15px;
+    font-weight: 600;
+    border: none;
+}
+
+
+/* Join */
+
+.btn.join {
+    background: linear-gradient(180deg, #F6B24A 0%, #F4A43A 100%);
+    box-shadow: 0 6px 16px rgba(244, 164, 58, 0.35);
+}
+
+
+/* Save */
+
+.btn.save {
+    background: #2FA39A;
+    color: white;
+    box-shadow: 0 6px 16px rgba(47, 163, 154, 0.35);
+}
+
+
+/* Tap effect */
+
+.btn:active {
+    transform: scale(0.98);
+}
+
+
+/* Header right text */
+
+.username {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+
+/* Card improvement */
+
+.ecard {
+    display: flex;
+    gap: 14px;
+    background: #fff;
+    padding: 16px;
+    border-radius: 18px;
+    margin-bottom: 16px;
+    border: 1px solid #F3F4F6;
+    /* softer */
+    align-items: center;
+    /* FIX alignment */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+    /* subtle shadow */
+}
+
+
+/* Icon circle better centering */
+
+.card-left {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* Title */
+
+.card-body h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 500;
+}
+
+
+/* Org text */
+
+.card-body p {
+    margin: 8px 0; 
+    font-size: 14px;
+    color: #ccc;
+}
+
+
+/* Meta (donors row) */
+
+.meta {
+    display: flex;
+    gap: 10px;
+    font-size: 12px;
+    color: #555;
+    align-items: center;
+}
+
+.meta span {
+    display: flex;
+    align-items: center;
+	font-size: 14px;
+    font-weight: 400;
+}
+
+
+/* Icon spacing */
+
+.meta-icon {
+    width: 14px;
+    margin-right: 6px;
+}

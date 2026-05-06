@@ -3,7 +3,7 @@
 }
 
 .notif-container {
-    padding: 24px;
+    padding: 20px;
 }
 
 
@@ -35,9 +35,9 @@
 }
 
 .notif-title {
-    font-size: 16px;
-    font-weight: 400;
-    color: #25201D;
+    font-size: 17px;
+    font-weight: 600;
+    color: #1A1A2E;
     margin: 0;
 }
 
@@ -60,8 +60,7 @@
     justify-content: space-between;
     border: 1px solid #EAEAEA;
     border-radius: 14px;
-    padding: 12px 16px;
-    padding-right: 20px;
+    padding: 14px 14px;
     margin-bottom: 10px;
     cursor: pointer;
     background: #fff;
@@ -80,7 +79,7 @@
 
 .notif-card-title {
     font-size: 14px;
-    font-weight: 400;
+    font-weight: 500;
     color: #25201D;
 }
 
@@ -96,7 +95,7 @@
 }
 
 .notif-chevron {
-    font-size: 24px;
+    font-size: 18px;
     color: #CCCCCC;
     margin-left: 10px;
     flex-shrink: 0;
@@ -106,5 +105,5 @@
 /* ── Spacer between sections ── */
 
 .notif-section-gap {
-    height: 0px;
+    height: 16px;
 }

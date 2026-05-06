@@ -4,7 +4,6 @@ import {
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 import './EventList.css';
 import HostHeader from '../../components/HostHeader';
 import { getEvents, logoUrl } from '../../services/events';
@@ -18,7 +17,6 @@ const EventList: React.FC = () => {
   const [events, setEvents]         = useState<Event[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
-const location = useLocation();
 
   // ─── Fetch events ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -33,7 +31,7 @@ const location = useLocation();
       }
     };
     fetchEvents();
-  }, [location.search]);
+  }, []);
 
   // ─── Filter by tab ────────────────────────────────────────────────────────
   const filteredEvents = events.filter((e) => {
@@ -196,11 +194,7 @@ const location = useLocation();
 
                 {event.status === 'draft' && event.started_at && (
                   <div className="badge upcoming">
-                    Live in <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6.66699 1.3335H9.33366" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 9.3335L10 7.3335" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-</svg> {formatStartedAt(event.started_at)}
+                    Live in ⏱ {formatStartedAt(event.started_at)}
                   </div>
                 )}
 
@@ -210,7 +204,7 @@ const location = useLocation();
 
                 {event.status === 'finished' && (
                   <div className="badge scheduled">
-                    Finished on· {formatStartedAt(event.started_at)}
+                    Finished · {formatStartedAt(event.started_at)}
                   </div>
                 )}
 
@@ -226,7 +220,7 @@ const location = useLocation();
           className="bottom-btn"
           onClick={() => router.push('/create-event')}
         >
-          Create New Event
+          Create New Events
         </div>
 
       </IonContent>

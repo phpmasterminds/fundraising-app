@@ -49,10 +49,10 @@
 
 .tabs {
     display: flex;
-    background: #EEF1F4;
+    background: #F8F9FB;
     border-radius: 30px;
     margin: 20px 0;
-    padding: 4px;
+    padding: 8px 4px;
 }
 
 .tab {
@@ -81,7 +81,7 @@
 
 /* Card */
 
-.ecard {
+.event-page .ecard {
     display: flex;
     gap: 14px;
     background: #fff;
@@ -89,7 +89,7 @@
     border-radius: 18px;
     margin-bottom: 16px;
     border: 1px solid #F1F2F6;
-    align-items: flex-start;
+    align-items: center;
     position: relative;
 }
 
@@ -164,6 +164,12 @@
 .meta-icon {
     width: 14px;
     margin-right: 4px;
+}
+
+.event-page .username {
+    font-size: 14px;
+    font-weight: 400;
+    color: #25201D;
 }
 
 
@@ -244,4 +250,209 @@
     border-radius: 30px;
     font-weight: 600;
     box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+}
+
+
+/* ── Append these styles to DEventList.css ─────────────────────── */
+
+/* Extra bottom padding so last card doesn't hide behind the bar */
+.delist-container {
+    padding-bottom: 100px;
+}
+
+/* ── Join Bottom Bar ── */
+.join-bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px 28px;          /* 28px for home indicator / safe area */
+    background: #fff;
+    border-top: 1px solid #F1F2F6;
+    z-index: 100;
+}
+
+.join-code-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #2BA7A0;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    border: none;
+    border-radius: 65px;
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.join-code-btn:active {
+    opacity: 0.85;
+}
+
+.join-qr-btn {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #E6F4F2;
+    border: 1.5px solid #2BA7A0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.join-qr-btn:active {
+    background: #d0edeb;
+}
+
+/* ── Code Modal Backdrop ── */
+.code-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 200;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ── Code Modal Sheet ── */
+.code-modal-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #fff;
+    border-radius: 24px 24px 0 0;
+    padding: 12px 24px 40px;
+    z-index: 201;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+
+.code-modal-handle {
+    width: 40px;
+    height: 4px;
+    background: #E0E0E0;
+    border-radius: 4px;
+    align-self: center;
+    margin-bottom: 20px;
+}
+
+.code-modal-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #25201D;
+    margin: 0 0 6px;
+    font-family: 'Outfit', sans-serif;
+}
+
+.code-modal-subtitle {
+    font-size: 13px;
+    color: #9AA0A6;
+    margin: 0 0 20px;
+    font-family: 'Outfit', sans-serif;
+}
+
+.code-modal-input-row {
+    margin-bottom: 16px;
+}
+
+.code-modal-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: #F7F8FA;
+    border: 1.5px solid #F1F2F6;
+    border-radius: 14px;
+    padding: 16px 18px;
+    font-size: 18px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    color: #25201D;
+    letter-spacing: 2px;
+    outline: none;
+    text-transform: uppercase;
+    transition: border-color 0.15s;
+}
+
+.code-modal-input::placeholder {
+    color: #C4C8CC;
+    letter-spacing: 0;
+    font-weight: 400;
+}
+
+.code-modal-input:focus {
+    border-color: #2BA7A0;
+    background: #fff;
+}
+
+.code-modal-error {
+    display: block;
+    font-size: 12px;
+    color: #E53E3E;
+    margin-top: 6px;
+    font-family: 'Outfit', sans-serif;
+}
+
+.code-modal-join-btn {
+    width: 100%;
+    background: #2BA7A0;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    border: none;
+    border-radius: 65px;
+    padding: 16px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    margin-bottom: 14px;
+}
+
+.code-modal-join-btn:active {
+    opacity: 0.85;
+}
+
+.code-modal-join-btn.disabled {
+    background: #C4C8CC;
+    cursor: not-allowed;
+}
+
+.code-modal-qr-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    background: none;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: 'Outfit', sans-serif;
+    color: #2BA7A0;
+    cursor: pointer;
+    padding: 6px;
+}
+
+.code-modal-qr-link:active {
+    opacity: 0.7;
 }

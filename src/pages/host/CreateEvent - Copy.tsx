@@ -99,9 +99,7 @@ const CreateEvent: React.FC = () => {
         images:        imageFiles.length ? imageFiles : undefined,
       });
 
-      //router.push('/events', 'root', 'replace');
-	  //router.push('/events', 'root');
-	  window.location.href = '/events';
+      router.push('/events', 'root', 'replace');
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.errors) {

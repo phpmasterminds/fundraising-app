@@ -1,0 +1,268 @@
+/* ══════════════════════════════════
+   Host Profile Page
+   Design tokens: Outfit font, #FCB040 orange, #2BA7A0 teal
+══════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
+}
+
+.hp-page {
+  --background: #fff;
+  font-family: 'Outfit', sans-serif;
+}
+
+.hp-container {
+  max-width: 380px;
+  margin: 0 auto;
+  padding: 0 20px 140px;
+}
+
+
+/* ── Avatar ─────────────────────── */
+
+.hp-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 8px 0 20px;
+}
+
+.hp-avatar {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #F2F2F2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hp-avatar-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.hp-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+}
+
+.hp-avatar-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #FCB040;
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hp-avatar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hp-avatar-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #25201D;
+}
+
+.hp-avatar-sub {
+  font-size: 12px;
+  color: #76716E;
+}
+
+
+/* ── Stats Row ───────────────────── */
+
+.hp-stats {
+  display: flex;
+  align-items: center;
+  background: #F8F9FB;
+  border-radius: 16px;
+  padding: 16px 0;
+  margin-bottom: 24px;
+}
+
+.hp-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.hp-stat-num {
+  font-size: 17px;
+  font-weight: 700;
+  color: #25201D;
+}
+
+.hp-stat-label {
+  font-size: 11px;
+  color: #76716E;
+}
+
+.hp-stat-divider {
+  width: 1px;
+  height: 32px;
+  background: #E5E7EB;
+}
+
+
+/* ── Form ────────────────────────── */
+
+.hp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.hp-input-group {
+  margin-bottom: 16px;
+}
+
+.hp-input-group label {
+  display: block;
+  font-size: 13px;
+  color: #76716E;
+  margin-bottom: 6px;
+}
+
+.hp-input-box {
+  background: #F2F2F2;
+  border-radius: 999px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+}
+
+.hp-input-box input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: #25201D;
+  outline: none;
+  font-family: 'Outfit', sans-serif;
+  width: 100%;
+}
+
+/* Change password row */
+.hp-input-box--action {
+  cursor: pointer;
+  justify-content: space-between;
+}
+
+.hp-pw-mask {
+  font-size: 16px;
+  color: #25201D;
+  letter-spacing: 2px;
+}
+
+.hp-change-pw {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2BA7A0;
+}
+
+
+/* ── Sign Out (in header right slot) ── */
+
+.hp-signout {
+  font-size: 14px;
+  font-weight: 500;
+  color: #FF3B30;
+  cursor: pointer;
+}
+
+
+/* ── Bottom Button ───────────────── */
+
+.hp-bottom {
+  position: fixed;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  max-width: 380px;
+  margin: auto;
+  padding: 0 20px;
+}
+
+.hp-save-btn {
+  width: 100%;
+  padding: 16px;
+  border-radius: 65px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Outfit', sans-serif;
+  border: 1.5px solid #C4811F;
+  background: linear-gradient(180deg, #F6B24A 0%, #F4A43A 100%);
+  color: #25201D;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(244, 164, 58, 0.30);
+}
+
+/* ================================================
+   PASSWORD MODAL
+   ================================================ */
+.hp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 999;
+}
+ 
+.hp-modal {
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 12px 20px 40px;
+  width: 100%;
+  max-width: 390px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+ 
+.hp-modal-handle {
+  width: 36px;
+  height: 4px;
+  background: #E0E0E0;
+  border-radius: 2px;
+  margin: 0 auto 8px;
+}
+ 
+.hp-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #25201D;
+  text-align: center;
+  margin: 0;
+}
+ 
+.hp-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+ 
+.hp-save-btn--modal {
+  margin-top: 4px;
+}

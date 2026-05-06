@@ -28,16 +28,16 @@
 
 /* Profile */
 
-.profile {
-    margin-top: 20px;
+.register-page .profile {
+    margin-top: 40px;
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-.avatar {
-    width: 64px;
-    height: 64px;
+.register-page .avatar {
+    width: 80px;
+    height: 80px;
     background: #f2f2f2;
     border-radius: 50%;
     display: flex;
@@ -51,7 +51,8 @@
 
 .profile span {
     color: #2FA39A;
-    font-weight: 500;
+    font-weight: 400;
+    font-size: 14px;
 }
 
 
@@ -69,34 +70,52 @@
     margin-top: 20px;
 }
 
-.input-group label {
-    font-size: 13px;
-    color: #76716E;
+.register-page .input-group label {
+    font-size: 14px;
+    color: #CCCCCC;
+    font-weight: 400;
 }
 
-.input-box {
-    margin-top: 8px;
+.register-page .input-box {
+    margin-top: 10px;
     background: #F8F9FB;
-    border: 1px solid #E5E7EB;
+    border: 1px solid #F1F2F6;
     border-radius: 40px;
     display: flex;
     align-items: center;
     padding: 14px 16px;
     gap: 12px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.input-box img {
+.register-page .input-box img {
     width: 18px;
+    height: 18px;
     opacity: 0.6;
+    transition: 0.3s ease;
 }
 
-.input-box input {
+.register-page .input-box input {
     border: none;
     background: transparent;
     flex: 1;
     font-size: 14px;
+    font-weight: 500;
     outline: none;
-    color: #25201D;
+    color: #333;
+}
+
+.register-page .input-box:focus-within img {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+
+/* ?? has value */
+
+.register-page .input-box.has-value img {
+    opacity: 1;
+    transform: scale(1.1);
 }
 
 
@@ -109,8 +128,8 @@
 
 /* Bottom */
 
-.bottom {
-    position: fixed;
+.register-page .bottom {
+    position: relative;
     bottom: 20px;
     left: 0;
     right: 0;

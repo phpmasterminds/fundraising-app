@@ -7,14 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import './ViewEvent.css';
 import HostHeader from '../../components/HostHeader';
-import {
-  getEvent,
-  updateEvent,
-  startEvent,
-  endEvent,
-  startRound,
-  endRound,
-} from '../../services/events';
+import { getEvent } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow } from '../../services/events';
 
 /* ── Local types ── */
@@ -47,7 +40,6 @@ interface RoundGroupRow {
 }
 
 interface RoundData {
-  id: number;
   label: string;
   status: 'complete' | 'bidding' | 'not-started';
   raised: string | null;
@@ -63,46 +55,27 @@ const ViewEvent: React.FC = () => {
   const router   = useIonRouter();
   const location = useLocation();
 
-  const [showSettings, setShowSettings]           = useState(false);
-  const [selectedGroup, setSelectedGroup]         = useState<Group | null>(null);
-  const [ignoreZeroBids, setIgnoreZeroBids]       = useState(false);
-  const [showQR, setShowQR]                       = useState(false);
-  const [showAllDonors, setShowAllDonors]         = useState(false);
-  const [showLiveSummary, setShowLiveSummary]     = useState(false);
+  const [showSettings, setShowSettings]         = useState(false);
+  const [selectedGroup, setSelectedGroup]       = useState<Group | null>(null);
+  const [ignoreZeroBids, setIgnoreZeroBids]     = useState(false);
+  const [showQR, setShowQR]                     = useState(false);
+  const [showAllDonors, setShowAllDonors]       = useState(false);
+  const [showLiveSummary, setShowLiveSummary]   = useState(false);
   const [showRoundOverview, setShowRoundOverview] = useState(false);
-  const [activeRoundTab, setActiveRoundTab]       = useState(0);
-  const [actionLoading, setActionLoading]         = useState(false);
-
-  // ─── Config edit state ────────────────────────────────────────────────────
-  const [editName, setEditName]                   = useState('');
-  const [editCharityName, setEditCharityName]     = useState('');
-  const [editTargetAmount, setEditTargetAmount]   = useState('');
-  const [saveLoading, setSaveLoading]             = useState(false);
-  const [saveError, setSaveError]                 = useState<string | null>(null);
+  const [activeRoundTab, setActiveRoundTab]     = useState(0);
 
   // ─── API state ────────────────────────────────────────────────────────────
   const [apiEvent, setApiEvent]   = useState<Event | null>(null);
   const [timerSecs, setTimerSecs] = useState(0);
   const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const eventId = new URLSearchParams(location.search).get('id');
-
-  const refreshEvent = async () => {
-    if (!eventId) return;
-    const data = await getEvent(Number(eventId));
-    setApiEvent(data);
-    if (data.current_round_timer != null) {
-      setTimerSecs(data.current_round_timer);
-    }
-  };
-
   useEffect(() => {
-    if (!eventId) return;
-    getEvent(Number(eventId)).then((data) => {
+    const params = new URLSearchParams(location.search);
+    const id     = params.get('id');
+    if (!id) return;
+
+    getEvent(Number(id)).then((data) => {
       setApiEvent(data);
-      setEditName(data.name ?? '');
-      setEditCharityName(data.charity_name ?? '');
-      setEditTargetAmount(String(data.target_amount ?? ''));
       if (data.current_round_timer != null) {
         setTimerSecs(data.current_round_timer);
       }
@@ -122,77 +95,16 @@ const ViewEvent: React.FC = () => {
     return `${m}:${s}`;
   };
 
-  // ─── Host action handlers ─────────────────────────────────────────────────
-  const handleStartEvent = async () => {
-    if (!eventId || actionLoading) return;
-    setActionLoading(true);
-    try {
-      const data = await startEvent(Number(eventId));
-      setApiEvent(data);
-    } catch (e) { console.error(e); }
-    finally { setActionLoading(false); }
-  };
-
-  const handleEndEvent = async () => {
-    if (!eventId || actionLoading) return;
-    setActionLoading(true);
-    try {
-      const data = await endEvent(Number(eventId));
-      setApiEvent(data);
-    } catch (e) { console.error(e); }
-    finally { setActionLoading(false); }
-  };
-
-  const handleStartRound = async () => {
-    if (!eventId || actionLoading) return;
-    setActionLoading(true);
-    try {
-      await startRound(Number(eventId));
-      await refreshEvent();
-    } catch (e) { console.error(e); }
-    finally { setActionLoading(false); }
-  };
-
-  const handleEndRound = async () => {
-    if (!eventId || actionLoading || !openRound) return;
-    setActionLoading(true);
-    try {
-      await endRound(Number(eventId), openRound.id);
-      await refreshEvent();
-    } catch (e) { console.error(e); }
-    finally { setActionLoading(false); }
-  };
-
-  // ─── Save handler ─────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!eventId || saveLoading) return;
-    setSaveError(null);
-    setSaveLoading(true);
-    try {
-      const updated = await updateEvent(Number(eventId), {
-        name:          editName,
-        charity_name:  editCharityName,
-        target_amount: Number(editTargetAmount),
-      });
-      setApiEvent(updated);
-      setShowQR(false);
-    } catch (e: any) {
-      setSaveError(e?.message ?? 'Failed to save. Please try again.');
-    } finally {
-      setSaveLoading(false);
-    }
-  };
-
   // ─── Map API groups → local Group type ────────────────────────────────────
   const mapGroups = (apiGroups: ApiGroup[]): Group[] =>
     apiGroups.map((g, gi) => ({
-      name:      g.name,
-      bids:      g.bids,
+      name:     g.name,
+      bids:     g.bids,
       totalBids: g.total_bids,
-      min:       g.min ?? undefined,
-      alert:     g.alert,
-      status:    g.status,
-      donors:    g.donors.map((d, di) => ({
+      min:      g.min ?? undefined,
+      alert:    g.alert,
+      status:   g.status,
+      donors:   g.donors.map((d, di) => ({
         initial:        d.initial,
         name:           d.pseudonym,
         sub:            d.pseudonym,
@@ -206,7 +118,6 @@ const ViewEvent: React.FC = () => {
   // ─── Map API rounds → local RoundData type ────────────────────────────────
   const mapRounds = (apiRounds: ApiRound[]): RoundData[] =>
     apiRounds.map((r) => ({
-      id:     r.id,
       label:  `R${r.round_number}`,
       status: r.status === 'closed' ? 'complete'
             : r.status === 'open'   ? 'bidding'
@@ -238,7 +149,7 @@ const ViewEvent: React.FC = () => {
     ? Math.min(100, Math.round((totalRaised / targetAmount) * 100))
     : 0;
 
-  const currentRoundNum  = apiEvent?.current_round_number ?? 0;
+  const currentRoundNum  = apiEvent?.current_round_number ?? 1;
   const totalRoundsCount = apiEvent?.rounds_count ?? 0;
 
   const scaleLabels = targetAmount > 0
@@ -248,18 +159,12 @@ const ViewEvent: React.FC = () => {
       })
     : ['£5k', '£10k', '£15k'];
 
-  // ─── Determine open round ─────────────────────────────────────────────────
-  const openRound = rounds.find(r => r.status === 'bidding');
-  const hasOpenRound = !!openRound;
-  const allRoundsDone = rounds.length === totalRoundsCount &&
-    rounds.every(r => r.status === 'complete');
-
-  // ─── Live summary ─────────────────────────────────────────────────────────
+  // ─── Live summary (uses real donors) ──────────────────────────────────────
   const liveSummary = {
-    eventName: apiEvent?.name         ?? '—',
+    eventName: apiEvent?.name          ?? '—',
     raised:    `£${totalRaised.toLocaleString()}`,
-    org:       apiEvent?.charity_name ?? '—',
-    donors:    apiEvent?.donors_count ?? 0,
+    org:       apiEvent?.charity_name  ?? '—',
+    donors:    apiEvent?.donors_count  ?? 0,
     groups:    groups.length,
     milestones: [
       { amount: `£${Math.round(targetAmount * 0.33).toLocaleString()}`, label: 'First Milestone!', reached: totalRaised >= targetAmount * 0.33 },
@@ -346,18 +251,6 @@ const ViewEvent: React.FC = () => {
     setSelectedGroup(null);
   };
 
-  const formatElapsed = (seconds: number): string => {
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-
-    if (d > 0) return `${d}d ${h}h ${m}m`;
-    if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
-  };
-
   return (
     <IonPage>
       <IonContent fullscreen className="view-event-page">
@@ -379,8 +272,8 @@ const ViewEvent: React.FC = () => {
                   onClick={() => { const s = showSettings; closeAll(); setShowSettings(!s); }}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M8.14667 1.3335H7.85333C7.49971 1.3335 7.16057 1.47397 6.91053 1.72402C6.66048 1.97407 6.52 2.31321 6.52 2.66683V2.78683C6.51976 3.02065 6.45804 3.25029 6.34103 3.45272C6.22401 3.65515 6.05583 3.82325 5.85333 3.94016L5.56667 4.10683C5.36398 4.22385 5.13405 4.28546 4.9 4.28546C4.66595 4.28546 4.43603 4.22385 4.23333 4.10683L4.13333 4.0535C3.82738 3.877 3.46389 3.82913 3.12267 3.92037C2.78145 4.01161 2.49037 4.23452 2.31333 4.54016L2.16667 4.7935C1.99018 5.09945 1.9423 5.46294 2.03354 5.80416C2.12478 6.14539 2.34769 6.43646 2.65333 6.6135L2.75333 6.68016C2.95485 6.7965 3.12241 6.96356 3.23937 7.16472C3.35632 7.36588 3.4186 7.59414 3.42 7.82683V8.16683C3.42093 8.40178 3.35977 8.6328 3.2427 8.8365C3.12563 9.04021 2.95681 9.20936 2.75333 9.32683L2.65333 9.38683C2.34769 9.56386 2.12478 9.85494 2.03354 10.1962C1.9423 10.5374 1.99018 10.9009 2.16667 11.2068L2.31333 11.4602C2.49037 11.7658 2.78145 11.9887 3.12267 12.08C3.46389 12.1712 3.82738 12.1233 4.13333 11.9468L4.23333 11.8935C4.43603 11.7765 4.66595 11.7149 4.9 11.7149C5.13405 11.7149 5.36398 11.7765 5.56667 11.8935L5.85333 12.0602C6.05583 12.1771 6.22401 12.3452 6.34103 12.5476C6.45804 12.75 6.51976 12.9797 6.52 13.2135V13.3335C6.52 13.6871 6.66048 14.0263 6.91053 14.2763C7.16057 14.5264 7.49971 14.6668 7.85333 14.6668H8.14667C8.50029 14.6668 8.83943 14.5264 9.08948 14.2763C9.33953 14.0263 9.48 13.6871 9.48 13.3335V13.2135C9.48024 12.9797 9.54196 12.75 9.65898 12.5476C9.77599 12.3452 9.94418 12.1771 10.1467 12.0602L10.4333 11.8935C10.636 11.7765 10.866 11.7149 11.1 11.7149C11.3341 11.7149 11.564 11.7765 11.7667 11.8935L11.8667 11.9468C12.1726 12.1233 12.5361 12.1712 12.8773 12.08C13.2186 11.9887 13.5096 11.7658 13.6867 11.4602L13.8333 11.2002C14.0098 10.8942 14.0577 10.5307 13.9665 10.1895C13.8752 9.84827 13.6523 9.5572 13.3467 9.38016L13.2467 9.32683C13.0432 9.20936 12.8744 9.04021 12.7573 8.8365C12.6402 8.6328 12.5791 8.40178 12.58 8.16683V7.8335C12.5791 7.59855 12.6402 7.36753 12.7573 7.16382C12.8744 6.96012 13.0432 6.79097 13.2467 6.6735L13.3467 6.6135C13.6523 6.43646 13.8752 6.14539 13.9665 5.80416C14.0577 5.46294 14.0098 5.09945 13.8333 4.7935L13.6867 4.54016C13.5096 4.23452 13.2186 4.01161 12.8773 3.92037C12.5361 3.82913 12.1726 3.877 11.8667 4.0535L11.7667 4.10683C11.564 4.22385 11.3341 4.28546 11.1 4.28546C10.866 4.28546 10.636 4.22385 10.4333 4.10683L10.1467 3.94016C9.94418 3.82325 9.77599 3.65515 9.65898 3.45272C9.54196 3.25029 9.48024 3.02065 9.48 2.78683V2.66683C9.48 2.31321 9.33953 1.97407 9.08948 1.72402C8.83943 1.47397 8.50029 1.3335 8.14667 1.3335Z" stroke={showSettings ? '#fff' : '#1A1A2E'} stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10C9.10457 10 10 9.10457 10 8C10 6.89543 9.10457 6 8 6C6.89543 6 6 6.89543 6 8C6 9.10457 6.89543 10 8 10Z" stroke={showSettings ? '#fff' : '#1A1A2E'} stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M8.14667 1.3335H7.85333C7.49971 1.3335 7.16057 1.47397 6.91053 1.72402C6.66048 1.97407 6.52 2.31321 6.52 2.66683V2.78683C6.51976 3.02065 6.45804 3.25029 6.34103 3.45272C6.22401 3.65515 6.05583 3.82325 5.85333 3.94016L5.56667 4.10683C5.36398 4.22385 5.13405 4.28546 4.9 4.28546C4.66595 4.28546 4.43603 4.22385 4.23333 4.10683L4.13333 4.0535C3.82738 3.877 3.46389 3.82913 3.12267 3.92037C2.78145 4.01161 2.49037 4.23452 2.31333 4.54016L2.16667 4.7935C1.99018 5.09945 1.9423 5.46294 2.03354 5.80416C2.12478 6.14539 2.34769 6.43646 2.65333 6.6135L2.75333 6.68016C2.95485 6.7965 3.12241 6.96356 3.23937 7.16472C3.35632 7.36588 3.4186 7.59414 3.42 7.82683V8.16683C3.42093 8.40178 3.35977 8.6328 3.2427 8.8365C3.12563 9.04021 2.95681 9.20936 2.75333 9.32683L2.65333 9.38683C2.34769 9.56386 2.12478 9.85494 2.03354 10.1962C1.9423 10.5374 1.99018 10.9009 2.16667 11.2068L2.31333 11.4602C2.49037 11.7658 2.78145 11.9887 3.12267 12.08C3.46389 12.1712 3.82738 12.1233 4.13333 11.9468L4.23333 11.8935C4.43603 11.7765 4.66595 11.7149 4.9 11.7149C5.13405 11.7149 5.36398 11.7765 5.56667 11.8935L5.85333 12.0602C6.05583 12.1771 6.22401 12.3452 6.34103 12.5476C6.45804 12.75 6.51976 12.9797 6.52 13.2135V13.3335C6.52 13.6871 6.66048 14.0263 6.91053 14.2763C7.16057 14.5264 7.49971 14.6668 7.85333 14.6668H8.14667C8.50029 14.6668 8.83943 14.5264 9.08948 14.2763C9.33953 14.0263 9.48 13.6871 9.48 13.3335V13.2135C9.48024 12.9797 9.54196 12.75 9.65898 12.5476C9.77599 12.3452 9.94418 12.1771 10.1467 12.0602L10.4333 11.8935C10.636 11.7765 10.866 11.7149 11.1 11.7149C11.3341 11.7149 11.564 11.7765 11.7667 11.8935L11.8667 11.9468C12.1726 12.1233 12.5361 12.1712 12.8773 12.08C13.2186 11.9887 13.5096 11.7658 13.6867 11.4602L13.8333 11.2002C14.0098 10.8942 14.0577 10.5307 13.9665 10.1895C13.8752 9.84827 13.6523 9.5572 13.3467 9.38016L13.2467 9.32683C13.0432 9.20936 12.8744 9.04021 12.7573 8.8365C12.6402 8.6328 12.5791 8.40178 12.58 8.16683V7.8335C12.5791 7.59855 12.6402 7.36753 12.7573 7.16382C12.8744 6.96012 13.0432 6.79097 13.2467 6.6735L13.3467 6.6135C13.6523 6.43646 13.8752 6.14539 13.9665 5.80416C14.0577 5.46294 14.0098 5.09945 13.8333 4.7935L13.6867 4.54016C13.5096 4.23452 13.2186 4.01161 12.8773 3.92037C12.5361 3.82913 12.1726 3.877 11.8667 4.0535L11.7667 4.10683C11.564 4.22385 11.3341 4.28546 11.1 4.28546C10.866 4.28546 10.636 4.22385 10.4333 4.10683L10.1467 3.94016C9.94418 3.82325 9.77599 3.65515 9.65898 3.45272C9.54196 3.25029 9.48024 3.02065 9.48 2.78683V2.66683C9.48 2.31321 9.33953 1.97407 9.08948 1.72402C8.83943 1.47397 8.50029 1.3335 8.14667 1.3335Z" stroke={showSettings ? '#fff' : '#1A1A2E'} strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M8 10C9.10457 10 10 9.10457 10 8C10 6.89543 9.10457 6 8 6C6.89543 6 6 6.89543 6 8C6 9.10457 6.89543 10 8 10Z" stroke={showSettings ? '#fff' : '#1A1A2E'} strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
 </svg>
                 </div>
               </>
@@ -439,10 +332,8 @@ const ViewEvent: React.FC = () => {
           <div className="ve-event-info">
             <div className="ve-stats-row">
               <div className="ve-stat-card" style={{ cursor: 'pointer' }} onClick={() => { closeAll(); setShowLiveSummary(true); }}>
-                
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M14.6663 4.6665L8.99967 10.3332L5.66634 6.99984L1.33301 11.3332" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10.667 4.6665H14.667V8.6665" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M2 14l5-5 4 4 7-8" stroke="#2BA7A0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <p className="ve-stat-value">£{totalRaised.toLocaleString()}</p>
                 <p className="ve-stat-label">Raised</p>
@@ -486,10 +377,10 @@ const ViewEvent: React.FC = () => {
           {apiEvent?.active_alert && (
             <div className="ve-alert-banner">
               <div className="ve-alert-left">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M18.108 14.9999L11.4414 3.33319C11.296 3.0767 11.0852 2.86335 10.8305 2.71492C10.5757 2.56649 10.2862 2.48828 9.99136 2.48828C9.69654 2.48828 9.40699 2.56649 9.15226 2.71492C8.89753 2.86335 8.68673 3.0767 8.54136 3.33319L1.8747 14.9999C1.72777 15.2543 1.65072 15.5431 1.65137 15.837C1.65202 16.1308 1.73035 16.4192 1.8784 16.673C2.02646 16.9269 2.23899 17.137 2.49444 17.2822C2.7499 17.4274 3.0392 17.5025 3.33303 17.4999H16.6664C16.9588 17.4996 17.246 17.4223 17.4991 17.2759C17.7522 17.1295 17.9624 16.9191 18.1085 16.6658C18.2545 16.4125 18.3314 16.1252 18.3313 15.8328C18.3312 15.5404 18.2542 15.2531 18.108 14.9999Z" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10 7.5V10.8333" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10 14.1665H10.0083" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M9 2L16.5 15.5H1.5L9 2Z" fill="#F4A43A" strokeLinejoin="round" />
+                  <path d="M9 7.5v3.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
+                  <circle cx="9" cy="13" r="0.8" fill="#fff" />
                 </svg>
                 <span className="ve-alert-text">{apiEvent.active_alert}</span>
               </div>
@@ -500,26 +391,19 @@ const ViewEvent: React.FC = () => {
           {/* ── Round Header ── */}
           {currentRoundNum > 0 && (
             <div className="ve-round-header">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6 2H2.66667C2.29848 2 2 2.29848 2 2.66667V6C2 6.36819 2.29848 6.66667 2.66667 6.66667H6C6.36819 6.66667 6.66667 6.36819 6.66667 6V2.66667C6.66667 2.29848 6.36819 2 6 2Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M13.333 2H9.99967C9.63148 2 9.33301 2.29848 9.33301 2.66667V6C9.33301 6.36819 9.63148 6.66667 9.99967 6.66667H13.333C13.7012 6.66667 13.9997 6.36819 13.9997 6V2.66667C13.9997 2.29848 13.7012 2 13.333 2Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M13.333 9.33301H9.99967C9.63148 9.33301 9.33301 9.63148 9.33301 9.99967V13.333C9.33301 13.7012 9.63148 13.9997 9.99967 13.9997H13.333C13.7012 13.9997 13.9997 13.7012 13.9997 13.333V9.99967C13.9997 9.63148 13.7012 9.33301 13.333 9.33301Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 9.3335H2.66667C2.29848 9.3335 2 9.63197 2 10.0002V13.3335C2 13.7017 2.29848 14.0002 2.66667 14.0002H6C6.36819 14.0002 6.66667 13.7017 6.66667 13.3335V10.0002C6.66667 9.63197 6.36819 9.3335 6 9.3335Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+                <rect x="1.5" y="1.5" width="6" height="6" rx="1" stroke="#1A1A2E" strokeWidth="1.5" />
+                <rect x="10.5" y="1.5" width="6" height="6" rx="1" stroke="#1A1A2E" strokeWidth="1.5" />
+                <rect x="1.5" y="10.5" width="6" height="6" rx="1" stroke="#1A1A2E" strokeWidth="1.5" />
+                <rect x="10.5" y="10.5" width="6" height="6" rx="1" stroke="#1A1A2E" strokeWidth="1.5" />
               </svg>
               <span className="ve-round-title">Round {currentRoundNum}</span>
               <div className="ve-round-timer">
-              
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g opacity="0.997358">
-<path d="M6.66699 1.3335H9.33366" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 9.3335L10 7.3335" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-</g>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <circle cx="6" cy="6" r="5.25" stroke="#fff" strokeWidth="1.2" />
+                  <path d="M6 3.5V6l1.5 1.5" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {apiEvent?.current_round_timer
-                  ? `${apiEvent.current_round_timer.human} · ${formatElapsed(apiEvent.current_round_timer.seconds)}`
-                  : '—'
-                }
+                {formatTimer(timerSecs)}
               </div>
               <span className="ve-round-complete">{apiEvent?.round_progress ?? '0/0 Complete'}</span>
             </div>
@@ -537,85 +421,23 @@ const ViewEvent: React.FC = () => {
                   <div className="ve-bid-dots">{renderDots(group.bids, group.totalBids, group.status)}</div>
                   <div className="ve-group-bids">{group.bids}/{group.totalBids} bids</div>
                   {group.min && <div className="ve-group-min">Min: {group.min}</div>}
-                  {group.alert && <div className="ve-group-alert"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_106_2447)">
-<path d="M10.8652 9.00011L6.86521 2.00011C6.77799 1.84621 6.65151 1.71821 6.49867 1.62915C6.34583 1.54009 6.1721 1.49316 5.99521 1.49316C5.81831 1.49316 5.64459 1.54009 5.49175 1.62915C5.33891 1.71821 5.21243 1.84621 5.12521 2.00011L1.12521 9.00011C1.03705 9.15279 0.990823 9.32606 0.991213 9.50237C0.991604 9.67867 1.0386 9.85174 1.12743 10.004C1.21627 10.1563 1.34378 10.2824 1.49706 10.3695C1.65033 10.4566 1.82391 10.5017 2.00021 10.5001H10.0002C10.1757 10.4999 10.348 10.4536 10.4998 10.3658C10.6517 10.2779 10.7778 10.1517 10.8655 9.99967C10.9531 9.84768 10.9992 9.67531 10.9992 9.49986C10.9991 9.32441 10.9529 9.15206 10.8652 9.00011Z" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 4.5V6.5" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 8.5H6.005" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-</g>
-<defs>
-<clipPath id="clip0_106_2447">
-<rect width="12" height="12" fill="white"/>
-</clipPath>
-</defs>
-</svg> Alert</div>}
+                  {group.alert && <div className="ve-group-alert">⚠ Alert</div>}
                 </div>
               ))}
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '30px 0', color: '#9AA0A6', fontSize: 14 }}>
-              {apiEvent?.status === 'draft' ? 'Launch the event to start accepting donors' : 'No active round yet'}
+              No active round yet
             </div>
           )}
         </div>
 
-        {/* ══ BOTTOM ACTIONS ══ */}
+        {/* ── Bottom Actions ── */}
         <div className="ve-bottom-area">
-
-          {/* DRAFT → Launch Event */}
-          {apiEvent?.status === 'draft' && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleStartEvent}
-            >
-              {actionLoading ? 'Launching…' : '🚀 Launch Event'}
-            </div>
-          )}
-
-          {/* LIVE + no open round + rounds remaining → Start Round */}
-          {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#2BA7A0', boxShadow: '0 6px 15px rgba(43,167,160,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleStartRound}
-            >
-              {actionLoading ? 'Starting…' : `▶ Start Round ${rounds.length + 1}`}
-            </div>
-          )}
-
-          {/* LIVE + open round → End Round (Call Time) */}
-          {apiEvent?.status === 'live' && hasOpenRound && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#E53E3E', boxShadow: '0 6px 15px rgba(229,62,62,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleEndRound}
-            >
-              {actionLoading ? 'Ending…' : '⏹ Call Time (End Round)'}
-            </div>
-          )}
-
-          {/* LIVE → End Event */}
-          {apiEvent?.status === 'live' && (
-            <div
-              className="ve-end-btn"
-              style={{ opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleEndEvent}
-            >
-              {actionLoading ? 'Ending…' : 'End Event'}
-            </div>
-          )}
-
-          {/* FINISHED */}
-          {apiEvent?.status === 'finished' && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#9AA0A6', boxShadow: 'none', cursor: 'default' }}
-            >
-              Event Finished
-            </div>
-          )}
-
+          <div className="ve-launch-btn" onClick={() => router.goBack()}>
+            Launch Round {currentRoundNum + 1} →
+          </div>
+          <div className="ve-end-btn" onClick={() => router.goBack()}>End Event</div>
         </div>
 
         {/* ══ QR / Setup Sheet ══ */}
@@ -630,34 +452,38 @@ const ViewEvent: React.FC = () => {
                 <span className="ve-sheet-topbar-title">Setup &amp; QR</span>
                 <div style={{ width: 36 }} />
               </div>
-
               <div className="ve-qr-section-title">Join Information</div>
               <div className="ve-qr-box">
-                {/* ── QR generated from join_code ── */}
-                {apiEvent?.join_code ? (
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(
-                      `${window.location.origin}/join?code=${apiEvent.join_code}`
-                    )}`}
-                    alt="QR Code"
-                    style={{ width: 180, height: 180, objectFit: 'contain' }}
-                  />
-                ) : (
-                  <div style={{
-                    width: 180, height: 180,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#9AA0A6', fontSize: 13, border: '1px dashed #C4C4C4', borderRadius: 8
-                  }}>
-                    No QR yet
-                  </div>
-                )}
+                <svg viewBox="0 0 200 200" width="180" height="180">
+                  <rect x="10" y="10" width="56" height="56" rx="4" fill="#000" />
+                  <rect x="18" y="18" width="40" height="40" rx="2" fill="#fff" />
+                  <rect x="26" y="26" width="24" height="24" rx="1" fill="#000" />
+                  <rect x="134" y="10" width="56" height="56" rx="4" fill="#000" />
+                  <rect x="142" y="18" width="40" height="40" rx="2" fill="#fff" />
+                  <rect x="150" y="26" width="24" height="24" rx="1" fill="#000" />
+                  <rect x="10" y="134" width="56" height="56" rx="4" fill="#000" />
+                  <rect x="18" y="142" width="40" height="40" rx="2" fill="#fff" />
+                  <rect x="26" y="150" width="24" height="24" rx="1" fill="#000" />
+                  {[76, 84, 92, 100, 108, 116, 124].map(x =>
+                    [10, 18, 26, 34, 42, 50, 58, 66, 74].map(y =>
+                      ((x * y) % 7 < 4) && <rect key={`a${x}-${y}`} x={x} y={y} width="5" height="5" fill="#000" />
+                    )
+                  )}
+                  {[10, 18, 26, 34, 42, 50, 58, 66, 74].map(x =>
+                    [76, 84, 92, 100, 108, 116, 124, 132].map(y =>
+                      ((x + y * 2) % 9 < 5) && <rect key={`b${x}-${y}`} x={x} y={y} width="5" height="5" fill="#000" />
+                    )
+                  )}
+                  {[80, 88, 96, 104, 112].map(x => [80, 88, 96, 104, 112].map(y =>
+                    ((x + y) % 16 < 8) && <rect key={`c${x}-${y}`} x={x} y={y} width="6" height="6" fill="#000" />
+                  ))}
+                </svg>
                 <button className="ve-qr-share-btn">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M15.8331 7.31021L10.1187 1.59582C10.0388 1.51585 9.93705 1.46137 9.82621 1.43926C9.71537 1.41715 9.60046 1.42841 9.49602 1.47161C9.39157 1.51481 9.30229 1.58801 9.23945 1.68196C9.17661 1.7759 9.14304 1.88637 9.14299 1.9994V4.8816C7.2901 5.04017 5.24363 5.94733 3.56002 7.37522C1.53284 9.09525 0.270676 11.3117 0.00567097 13.616C-0.0150382 13.7952 0.0212866 13.9763 0.109476 14.1336C0.197665 14.2909 0.333225 14.4164 0.496864 14.4922C0.660503 14.568 0.843883 14.5903 1.02091 14.5559C1.19793 14.5214 1.35958 14.432 1.48284 14.3003C2.26857 13.4639 5.06434 10.8189 9.14299 10.586V13.4282C9.14304 13.5412 9.17661 13.6517 9.23945 13.7456C9.30229 13.8396 9.39157 13.9128 9.49602 13.956C9.60046 13.9992 9.71537 14.0104 9.82621 13.9883C9.93705 13.9662 10.0388 13.9117 10.1187 13.8318L15.8331 8.11737C15.94 8.01025 16 7.86511 16 7.71379C16 7.56248 15.94 7.41734 15.8331 7.31021ZM10.2859 12.0489V9.99955C10.2859 9.848 10.2257 9.70265 10.1185 9.59548C10.0113 9.48832 9.86598 9.42811 9.71443 9.42811C7.70868 9.42811 5.75507 9.95169 3.90789 10.9853C2.96712 11.514 2.09058 12.1497 1.2957 12.8796C1.70999 11.1767 2.7543 9.5574 4.29933 8.24666C5.95793 6.84021 7.98225 5.99947 9.71443 5.99947C9.86598 5.99947 10.0113 5.93927 10.1185 5.8321C10.2257 5.72494 10.2859 5.57959 10.2859 5.42804V3.37942L14.621 7.71379L10.2859 12.0489Z" fill="#25201D"/>
 </svg>
                 </button>
               </div>
-
               <div className="ve-qr-section-title" style={{ marginTop: 20 }}>Public Join Link</div>
               <div className="ve-join-link-box">
                 <span className="ve-join-link-text">
@@ -669,57 +495,23 @@ const ViewEvent: React.FC = () => {
 </svg>
                 </button>
               </div>
-
               <div className="ve-qr-divider" />
               <div className="ve-qr-section-title">Event Configuration</div>
-
-              {saveError && (
-                <div style={{ color: '#E53E3E', fontSize: 13, padding: '0 16px 8px' }}>{saveError}</div>
-              )}
-
               <div className="ve-config-field">
                 <label className="ve-config-label">Event Name</label>
-                <input
-                  className="ve-config-input"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" defaultValue={apiEvent?.name ?? ''} />
               </div>
               <div className="ve-config-field">
                 <label className="ve-config-label">Charity Name</label>
-                <input
-                  className="ve-config-input"
-                  value={editCharityName}
-                  onChange={(e) => setEditCharityName(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" defaultValue={apiEvent?.charity_name ?? ''} />
               </div>
               <div className="ve-config-field">
                 <label className="ve-config-label">Target Amount (£)</label>
-                <input
-                  className="ve-config-input"
-                  type="number"
-                  value={editTargetAmount}
-                  onChange={(e) => setEditTargetAmount(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" defaultValue={String(apiEvent?.target_amount ?? '')} type="number" />
               </div>
-
               <div style={{ height: 100 }} />
               <div className="ve-bottom-area" style={{ background: 'linear-gradient(to top,#fff 80%,transparent)' }}>
-                <div
-                  className="ve-launch-btn"
-                  style={{
-                    background: '#2BA7A0',
-                    boxShadow: '0 6px 15px rgba(43,167,160,0.35)',
-                    opacity: saveLoading ? 0.6 : 1,
-                    cursor: saveLoading ? 'not-allowed' : 'pointer',
-                  }}
-                  onClick={handleSave}
-                >
-                  {saveLoading ? 'Saving…' : 'Save'}
-                </div>
+                <div className="ve-launch-btn" style={{ background: '#2BA7A0', boxShadow: '0 6px 15px rgba(43,167,160,0.35)' }}>Save</div>
               </div>
             </div>
           </>
@@ -903,9 +695,9 @@ const ViewEvent: React.FC = () => {
                   <div className="ve-ro-card-header">
                     <span className="ve-ro-card-title">Round {activeRoundTab + 1}</span>
                     <span className={`ve-ro-badge ve-ro-badge--${activeRound.status}`}>
-                      {activeRound.status === 'complete'    ? 'Complete'        : ''}
-                      {activeRound.status === 'bidding'     ? 'Bidding'         : ''}
-                      {activeRound.status === 'not-started' ? 'Not yet started' : ''}
+                      {activeRound.status === 'complete'    ? 'Complete'       : ''}
+                      {activeRound.status === 'bidding'     ? 'Bidding'        : ''}
+                      {activeRound.status === 'not-started' ? 'Not yet started': ''}
                     </span>
                   </div>
 

@@ -4,6 +4,7 @@ import {
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import './Notification.css';
+import HostHeader from '../../components/HostHeader';
 
 interface NotifItem {
   title: string;
@@ -65,13 +66,12 @@ const Notification: React.FC = () => {
       <IonContent fullscreen className="notification-page">
         <div className="notif-container">
 
-          {/* ── Header ── */}
-          <div className="notif-header">
-            <div className="notif-back-btn" onClick={() => router.goBack()}>
-              <img src="/assets/img/Back.svg" alt="back" />
-            </div>
-            <h1 className="notif-title">Notification</h1>
-          </div>
+          {/* ── Shared Header ── */}
+          <HostHeader
+            variant="back"
+            title="Notification"
+            onBack={() => router.goBack()}
+          />
 
           {/* ── Sections ── */}
           {notifications.map((section, si) => (

@@ -2,13 +2,11 @@
     --background: #fff;
 }
 
-
 /* Container */
 
 .container {
     padding: 20px;
 }
-
 
 /* Header */
 
@@ -25,19 +23,13 @@
     font-weight: 500;
 }
 
-.event-page .logo img {
+.logo img {
     width: 20px;
-    margin-top: 3px;
 }
 
-.event-page .logo span {
-    font-size: 16px;
-    font-weight: 400;
-}
-
-.event-page .header-right {
+.header-right {
     display: flex;
-    gap: 20px;
+    gap: 12px;
 }
 
 .bell {
@@ -53,49 +45,41 @@
 
 /* Tabs */
 
-.event-page .tabs {
+.tabs {
     display: flex;
-    background: #F8F9FB;
+    background: #f8f9fb;
     border-radius: 30px;
     margin: 5px 0 20px;
     padding: 8px 4px;
 }
 
-.event-page .tab {
+.tab {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 10px;
+    gap: 6px;
+    padding: 8px;
     font-size: 14px;
     color: #9AA0A6;
     cursor: pointer;
 }
 
-.event-page .menu {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-}
-
-.event-page .tab img {
+.tab img {
     width: 14px;
 }
 
-.event-page .tab.active {
+.tab.active {
     background: #fff;
-    border-radius: 14px;
+    border-radius: 30px;
     color: #2BA7A0;
     font-weight: 500;
-    box-shadow: 0px 1px 2px -1px #0000001A;
-    box-shadow: 0px 1px 3px 0px #0000001A;
 }
 
 
 /* Card */
 
-.event-page .ecard {
+.ecard {
     display: flex;
     gap: 14px;
     background: #fff;
@@ -105,12 +89,13 @@
     border: 1px solid #F1F2F6;
     align-items: center;
     position: relative;
+	box-shadow: 0 2px 6px #0000000a;
 }
 
 
 /* Icon */
 
-.event-page .card-left {
+.card-left {
     width: 64px;
     height: 64px;
     min-width: 64px;
@@ -120,8 +105,8 @@
     justify-content: center;
 }
 
-.event-page .card-left img {
-    width: 40px;
+.card-left img {
+    width: 22px;
 }
 
 .teal {
@@ -153,16 +138,16 @@
     width: 100%;
 }
 
-.event-page .card-body h3 {
+.card-body h3 {
     margin: 0;
     font-size: 18px;
     font-weight: 500;
 }
 
-.event-page .card-body p {
-    margin: 8px 0 8px;
-    font-size: 14px;
-    color: #CCCCCC;
+.card-body p {
+    margin: 4px 0 6px;
+    font-size: 12px;
+    color: #9AA0A6;
 }
 
 
@@ -172,31 +157,22 @@
     display: flex;
     gap: 14px;
     font-size: 12px;
-    color: #25201D !important;
+    color: #555;
 }
 
-.meta span {
-    display: flex;
-    align-items: center;
-    font-size: 14px;
-    font-weight: 400;
+.meta-icon {
+    width: 14px;
+    margin-right: 4px;
 }
 
 
 /* Badge LEFT */
 
-.event-page .badge {
+.badge {
     margin-top: 8px;
-    padding: 4px 12px;
+    padding: 6px 12px;
     border-radius: 20px;
     font-size: 12px;
-    font-weight: normal;
-    display: flex;
-    align-items: center;
-}
-
-.badge svg {
-    margin: 0px 4px;
 }
 
 .live {
@@ -209,23 +185,23 @@
 }
 
 .scheduled {
-    background: #F1F2F6;
+    background: #E0E0E0;
 }
 
 
 /* Menu */
 
-.event-page .menu img {
-    width: 20px;
+.menu img {
+    width: 16px;
     cursor: pointer;
 }
 
 
 /* Dropdown */
 
-.event-page .dropdown {
+.dropdown {
     position: absolute;
-    top: 24px;
+    top: 40px;
     right: 10px;
     background: #fff;
     border-radius: 10px;
@@ -256,18 +232,19 @@
 
 /* Bottom Button */
 
-.event-page .bottom-btn {
+.bottom-btn {
     position: fixed;
     bottom: 20px;
     left: 20px;
     right: 20px;
-    background: #F4A43A;
+    background: #f4a43a;
     padding: 16px;
     text-align: center;
     border-radius: 30px;
     font-weight: 600;
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 6px 15px #00000026;
     opacity: 1;
     border: 1px solid #C5821F;
     font-size: 18px;
+	cursor: pointer;
 }
