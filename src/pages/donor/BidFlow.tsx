@@ -5,27 +5,19 @@ import { useLocation } from 'react-router-dom';
 import './BidFlow.css';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import 'swiper/css';
-
-import {
-  getDonorEventDetail,
-  getCurrentRound,
-  submitBid,
-  quitEvent,
-  getPaymentSummary,
-  markPaidOffline,
-  storageUrl,
-  DonorEventDetail,
-  RoundState,
-  PaymentSummary,
-} from '../../services/donorEvents';
+import 'swiper/css/pagination';
+import { Pagination, EffectCoverflow } from 'swiper/modules';
+import 'swiper/css/effect-coverflow';
+import api from '../../services/api';
+import { storageUrl } from '../../services/donorEvents';
 
 /* ─────────────────────────────────────
    Types
 ───────────────────────────────────── */
 type Screen =
   | 'loading'
-  | 'waiting'      // ← new: host hasn't opened round yet
-  | 'starting'     // round just opened — show 2.5s animation then bid-entry
+  | 'waiting'
+  | 'starting'
   | 'bid-entry'
   | 'confirm-bid'
   | 'submitted'
@@ -33,6 +25,52 @@ type Screen =
   | 'payment-intro'
   | 'payment-form'
   | 'receipt';
+
+interface RoundState {
+  id: number | null;
+  round_number: number;
+  status: 'waiting' | 'open' | 'closed';
+  seconds_left: number | null;
+  matched_amount: number | null;
+  group_total: number | null;
+  match_ratio: string;
+  group_size: number;
+  my_group: { name: string; members: GroupMember[] } | null;
+  my_bid: number | null;
+  my_cumulative: number;
+  round_bids: RoundBid[];
+}
+
+interface GroupMember {
+  pseudonym: string;
+  initial: string;
+  emoji: string | null;
+  is_you: boolean;
+  bid_status: 'waiting' | 'bidding' | 'submitted';
+}
+
+interface RoundBid {
+  pseudonym: string;
+  initial: string;
+  amount: number;
+  is_you: boolean;
+  is_minimum: boolean;
+}
+
+interface EventDetail {
+  id: number;
+  name: string;
+  charity_name: string;
+  charity_link: string;
+  rounds_count: number;
+  group_size: number;
+  status: string;
+  logo: string | null;
+  images: string[];
+  my_pseudonym: string | null;
+  my_initial: string | null;
+  my_emoji: string | null;
+}
 
 interface Particle {
   x: number; y: number; w: number; h: number;
@@ -46,6 +84,8 @@ const CONFETTI_COLORS = [
   '#A8E6E2','#fff','#fff',
 ];
 
+const slideImages = ['/assets/img/Slide1.jpg', '/assets/img/Slide2.jpg', '/assets/img/Slide3.jpg'];
+
 function useQuery() {
   return new URLSearchParams(useLocation().search);
 }
@@ -58,10 +98,9 @@ const BidFlow: React.FC = () => {
   const query   = useQuery();
   const eventId = Number(query.get('id'));
 
-  // ── API data ──────────────────────────────────────────────────
-  const [event,   setEvent]   = useState<DonorEventDetail | null>(null);
+  // ── API state ──────────────────────────────────────────────────
+  const [event,   setEvent]   = useState<EventDetail | null>(null);
   const [round,   setRound]   = useState<RoundState | null>(null);
-  const [payment, setPayment] = useState<PaymentSummary | null>(null);
 
   // ── UI state ──────────────────────────────────────────────────
   const [screen,        setScreen]        = useState<Screen>('loading');
@@ -69,134 +108,128 @@ const BidFlow: React.FC = () => {
   const [inputVal,      setInputVal]      = useState('0');
   const [groupBidsOpen, setGroupBidsOpen] = useState(false);
   const [submitting,    setSubmitting]    = useState(false);
-  const [slideImages,   setSlideImages]   = useState<string[]>([]);
+
+  // ✅ Elapsed timer — counts UP, seeded from API
+  const [elapsed, setElapsed] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef    = useRef<number>(0);
   const particles = useRef<Particle[]>([]);
   const pollRef   = useRef<any>(null);
+  const timerRef  = useRef<any>(null);
 
-  // ─────────────────────────────────────────────────────────────
-  // Polling helpers
-  // ─────────────────────────────────────────────────────────────
+  // ── Timer ──────────────────────────────────────────────────────
+  const stopTimer = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  };
+
+  const startTimer = useCallback((seed: number) => {
+    stopTimer();
+    setElapsed(seed);
+    timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
+  }, []);
+
+  useEffect(() => {
+    if (round?.status === 'open') {
+      startTimer(round.seconds_left ?? 0);
+    } else {
+      stopTimer();
+    }
+    return () => stopTimer();
+  }, [round?.id, round?.status]);
+
+  // ── Polling ────────────────────────────────────────────────────
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   };
+
+  const fetchRound = useCallback(async (): Promise<RoundState> => {
+    const res = await api.get(`/donor/events/${eventId}/group`);
+    return res.data;
+  }, [eventId]);
 
   const startPolling = useCallback(() => {
     stopPolling();
     pollRef.current = setInterval(async () => {
       try {
-        const rd = await getCurrentRound(eventId);
+        const rd = await fetchRound();
         setRound(rd);
         if (rd.status === 'open') {
           stopPolling();
-          // Round just opened → show starting animation then bid-entry
           setScreen('starting');
         } else if (rd.status === 'closed') {
           stopPolling();
           setScreen('results');
         }
-        // status === 'waiting' → keep polling silently, don't change screen
       } catch (_) {}
     }, 3000);
-  }, [eventId]);
+  }, [fetchRound]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Initial load
-  // ─────────────────────────────────────────────────────────────
+  // ── Initial load ───────────────────────────────────────────────
   useEffect(() => {
     if (!eventId) return;
 
-    Promise.all([
-      getDonorEventDetail(eventId),
-      getCurrentRound(eventId),
-    ]).then(([ev, rd]) => {
-      setEvent(ev);
-      setRound(rd);
-
-      const imgs = ev.images?.length
-        ? ev.images.map(p => storageUrl(p) ?? '/assets/img/Slide1.jpg')
-        : ['/assets/img/Slide1.jpg', '/assets/img/Slide2.jpg', '/assets/img/Slide3.jpg'];
-      setSlideImages(imgs);
-
-      const defaultBid = rd.my_bid ?? 0;
-      setBidAmount(defaultBid);
-      setInputVal(String(defaultBid));
-
-      if (rd.status === 'open') {
-        // Round is already open → show starting animation
-        setScreen('starting');
-      } else if (rd.status === 'closed') {
-        setScreen('results');
-      } else {
-        // status === 'waiting' → wait for host to open round
-        setScreen('waiting');
-        startPolling();
-      }
-    }).catch(async () => {
-      // getCurrentRound failed — no round exists yet
+    const load = async () => {
       try {
-        const ev = await getDonorEventDetail(eventId);
-        setEvent(ev);
+        const [evRes, rdRes] = await Promise.all([
+          api.get(`/donor/events/${eventId}`),
+          fetchRound(),
+        ]);
+        setEvent(evRes.data);
+        setRound(rdRes);
 
-        const imgs = ev.images?.length
-          ? ev.images.map(p => storageUrl(p) ?? '/assets/img/Slide1.jpg')
-          : ['/assets/img/Slide1.jpg', '/assets/img/Slide2.jpg', '/assets/img/Slide3.jpg'];
-        setSlideImages(imgs);
+        const defaultBid = rdRes.my_bid ?? 0;
+        setBidAmount(defaultBid);
+        setInputVal(String(defaultBid));
 
-        // No round yet — show waiting screen and poll
+        if (rdRes.status === 'open') {
+          setScreen('starting');
+        } else if (rdRes.status === 'closed') {
+          setScreen('results');
+        } else {
+          setScreen('waiting');
+          startPolling();
+        }
+      } catch {
+        // No round yet — show waiting
+        try {
+          const evRes = await api.get(`/donor/events/${eventId}`);
+          setEvent(evRes.data);
+        } catch {}
         setScreen('waiting');
         startPolling();
-      } catch {
-        setScreen('waiting');
       }
-    });
+    };
 
-    return () => stopPolling();
+    load();
+    return () => { stopPolling(); stopTimer(); };
   }, [eventId]);
 
-  // ─────────────────────────────────────────────────────────────
-  // 'starting' → 'bid-entry' after 2.5s
-  // Only fires when screen is 'starting' (round is open)
-  // ─────────────────────────────────────────────────────────────
+  // starting → bid-entry after 2.5s
   useEffect(() => {
     if (screen !== 'starting') return;
     const t = setTimeout(() => setScreen('bid-entry'), 2500);
     return () => clearTimeout(t);
   }, [screen]);
 
-  // ─────────────────────────────────────────────────────────────
-  // 'submitted' → show for 2s then poll for round to close
-  // ─────────────────────────────────────────────────────────────
+  // submitted → poll then results
   useEffect(() => {
     if (screen !== 'submitted') return;
-    const t = setTimeout(() => {
-      startPolling();
-      setScreen('results');
-    }, 2000);
+    const t = setTimeout(() => { startPolling(); setScreen('results'); }, 2000);
     return () => clearTimeout(t);
   }, [screen]);
 
-  // ─────────────────────────────────────────────────────────────
-  // 'results' → poll until next round or event finishes
-  // ─────────────────────────────────────────────────────────────
+  // results → poll for next round or event end
   useEffect(() => {
     if (screen !== 'results') return;
     startPolling();
     return () => stopPolling();
   }, [screen]);
 
-  // ─────────────────────────────────────────────────────────────
-  // When round data updates on results screen
-  // ─────────────────────────────────────────────────────────────
+  // When round updates on results screen — detect next round opening
   useEffect(() => {
     if (!round || screen !== 'results') return;
-    if (event?.status === 'finished') {
-      stopPolling();
-      getPaymentSummary(eventId).then(setPayment);
-    }
-    if (round.status === 'open' && screen === 'results') {
+    if (round.status === 'open') {
       stopPolling();
       const defaultBid = round.my_bid ?? 0;
       setBidAmount(defaultBid);
@@ -205,9 +238,7 @@ const BidFlow: React.FC = () => {
     }
   }, [round, screen]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Confetti
-  // ─────────────────────────────────────────────────────────────
+  // ── Confetti ───────────────────────────────────────────────────
   const spawnParticles = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const W = canvas.width;
@@ -250,20 +281,19 @@ const BidFlow: React.FC = () => {
     if (screen === 'results') return startConfetti() ?? undefined;
   }, [screen, startConfetti]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────
   const adjustBid = (delta: number) =>
     setBidAmount(prev => { const n = Math.max(0, prev + delta); setInputVal(String(n)); return n; });
 
+  // MM:SS elapsed counter
   const fmt = (s: number) =>
-    `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+    `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
   const handleSubmitBid = async () => {
     if (!round || submitting) return;
     setSubmitting(true);
     try {
-      await submitBid(eventId, bidAmount);
+      await api.post(`/donor/events/${eventId}/bid`, { amount: bidAmount });
       setScreen('submitted');
     } catch (_) {
     } finally {
@@ -271,34 +301,32 @@ const BidFlow: React.FC = () => {
     }
   };
 
-  const handleMarkPaid = async () => {
-    await markPaidOffline(eventId);
-    setScreen('receipt');
+  const handleQuit = async () => {
+    try { await api.post(`/donor/events/${eventId}/quit`); } catch {}
+    router.goBack();
   };
 
   // Derived values
-  const myPseudonym      = event?.my_pseudonym ?? 'You';
-  const myInitial        = event?.my_initial   ?? 'Y';
-  const myEmoji          = event?.my_emoji     ?? '🐰';
-  const eventName        = event?.name         ?? 'Event';
-  const charityName      = event?.charity_name ?? '';
-  const roundNumber      = round?.round_number ?? 1;
-  const totalRounds      = event?.rounds_count ?? 1;
-  const roundLabel       = `Round ${roundNumber}`;
-  const myCumulative     = round?.my_cumulative ?? 0;
-  const matchedAmount    = round?.matched_amount ?? 0;
-  const groupTotal       = round?.group_total ?? 0;
-  const matchRatio       = round?.match_ratio ?? '1:3';
-  const groupSize        = round?.group_size ?? 4;
-  const groupMembers     = round?.my_group?.members ?? [];
-  const groupName        = round?.my_group?.name ?? 'Group';
-  const roundBids        = round?.round_bids ?? [];
-  const roundSecondsLeft = round?.seconds_left ?? 0;
-  const isLastRound      = roundNumber >= totalRounds;
-  const totalDonation    = payment?.total_amount ?? myCumulative;
-  const charityLink      = payment?.charity_link ?? event?.charity_link ?? '#';
-  const paymentRef       = payment?.reference ?? '';
-  const paymentDate      = payment?.date ?? '';
+  const myPseudonym   = event?.my_pseudonym ?? 'You';
+  const myEmoji       = event?.my_emoji     ?? '🐰';
+  const eventName     = event?.name         ?? 'Event';
+  const charityName   = event?.charity_name ?? '';
+  const charityLink   = event?.charity_link ?? '#';
+  const roundNumber   = round?.round_number ?? 1;
+  const totalRounds   = event?.rounds_count ?? 1;
+  const roundLabel    = `Round ${roundNumber}`;
+  const myCumulative  = round?.my_cumulative ?? 0;
+  const matchedAmount = round?.matched_amount ?? 0;
+  const groupTotal    = round?.group_total ?? 0;
+  const matchRatio    = round?.match_ratio ?? '1:3';
+  const groupSize     = round?.group_size ?? 4;
+  const groupMembers  = round?.my_group?.members ?? [];
+  const groupName     = round?.my_group?.name ?? 'Your Group';
+  const roundBids     = round?.round_bids ?? [];
+  const isLastRound   = roundNumber >= totalRounds;
+  const eventImages   = event?.images?.length
+    ? event.images.map(p => storageUrl(p) ?? '/assets/img/Slide1.jpg')
+    : slideImages;
 
   /* ══════════════════════════════════════════════════
      SCREEN: Loading
@@ -306,16 +334,16 @@ const BidFlow: React.FC = () => {
   if (screen === 'loading') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
       <div className="bf-submitted">
-        <p style={{ color: '#9AA0A6', marginTop: 40 }}>Loading round...</p>
+        <p style={{ color: '#9AA0A6', marginTop: 60 }}>Loading...</p>
       </div>
     </IonContent></IonPage>
   );
 
   /* ══════════════════════════════════════════════════
-     SCREEN: Waiting (host hasn't opened round yet)
+     SCREEN: Waiting
   ══════════════════════════════════════════════════ */
   if (screen === 'waiting') return (
-    <IonPage><IonContent fullscreen className="bf-page bf-white">
+    <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       <div className="bf-s1">
         <div className="bf-logo">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -344,7 +372,7 @@ const BidFlow: React.FC = () => {
   );
 
   /* ══════════════════════════════════════════════════
-     SCREEN 1 — Round Starting (round just opened)
+     SCREEN 1 — Round Starting
   ══════════════════════════════════════════════════ */
   if (screen === 'starting') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
@@ -381,18 +409,13 @@ const BidFlow: React.FC = () => {
   if (screen === 'bid-entry') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       <div className="bf-s2">
-        <EventCard
-          eventName={eventName}
-          timer={fmt(roundSecondsLeft)}
-          timerOrange={false}
-          roundLabel={roundLabel}
-        />
+        <EventCard eventName={eventName} timer={fmt(elapsed)} timerOrange={false} roundLabel={roundLabel} />
         <div className="bf-amount-zone">
           <p className="bf-amount-hint">Type your bid</p>
           <div className="bf-amount-display">
             <span className="bf-pound">£</span>
             <input className="bf-amount-input" type="number" value={inputVal}
-              onChange={e => { setInputVal(e.target.value); const n = parseInt(e.target.value,10); if(!isNaN(n)) setBidAmount(n); }}
+              onChange={e => { setInputVal(e.target.value); const n = parseInt(e.target.value, 10); if (!isNaN(n)) setBidAmount(n); }}
               inputMode="numeric" style={{ width: `${Math.max(inputVal.length, 1)}ch` }}/>
           </div>
           <p className="bf-amount-sub">Enter your preferred bid amount</p>
@@ -429,29 +452,19 @@ const BidFlow: React.FC = () => {
      SCREEN 3 — Confirm Bid
   ══════════════════════════════════════════════════ */
   if (screen === 'confirm-bid') return (
-    <IonPage><IonContent fullscreen className="bf-page bf-white"  scrollY>
+    <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       <div className="bf-s3">
         <div className="bf-s3-nav">
           <button className="bf-back-circle" onClick={() => setScreen('bid-entry')}>
-           
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M7.99967 12.6666L3.33301 7.99998L7.99967 3.33331" stroke="#25201D" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M12.6663 8H3.33301" stroke="#25201D" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M7.99967 12.6666L3.33301 7.99998L7.99967 3.33331" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M12.6663 8H3.33301" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
-        <EventCard
-          eventName={eventName}
-          timer={fmt(roundSecondsLeft)}
-          timerOrange
-          roundLabel={roundLabel}
-        />
-        <GroupCard
-          groupName={groupName}
-          members={groupMembers}
-          myPseudonym={myPseudonym}
-        />
+        <EventCard eventName={eventName} timer={fmt(elapsed)} timerOrange roundLabel={roundLabel} />
+        <GroupCard groupName={groupName} members={groupMembers} />
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
@@ -464,12 +477,12 @@ const BidFlow: React.FC = () => {
             </button>
           </div>
           <div className="bf-chips">
-            {(['+£100','+£200','+double'] as const).map((c,i) => (
-              <button key={c} className={`bf-chip ${i===1?'bf-chip--active':''}`}
+            {(['+£100', '+£200', '+double'] as const).map((c, i) => (
+              <button key={c} className={`bf-chip ${i === 1 ? 'bf-chip--active' : ''}`}
                 onClick={() => {
-                  if(c==='+£100') adjustBid(100);
-                  if(c==='+£200') adjustBid(200);
-                  if(c==='+double'){const n=bidAmount*2;setBidAmount(n);setInputVal(String(n));}
+                  if (c === '+£100') adjustBid(100);
+                  if (c === '+£200') adjustBid(200);
+                  if (c === '+double') { const n = bidAmount * 2; setBidAmount(n); setInputVal(String(n)); }
                 }}>
                 {c}
               </button>
@@ -506,12 +519,13 @@ const BidFlow: React.FC = () => {
   );
 
   /* ══════════════════════════════════════════════════
-     SCREEN 5 — Round Results
+     SCREEN 5 — Round Results (with confetti)
   ══════════════════════════════════════════════════ */
-  if (screen === 'results-r1') return (
+  if (screen === 'results') return (
     <IonPage><IonContent fullscreen className="bf-page" scrollY>
       <canvas ref={canvasRef} className="bf-canvas" />
       <div className="bf-results-wrap">
+
         {/* Hero */}
         <div className="bf-hero">
           <div className="bf-hero-trophy"><img src="/assets/img/trophy.svg" alt="" /></div>
@@ -537,14 +551,11 @@ const BidFlow: React.FC = () => {
             <span className="bf-stat3-val">{groupSize}</span><span className="bf-stat3-lbl">In Group</span>
           </div>
           <div className="bf-stat3">
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M13.333 2V4.66667" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M14.6667 3.33337H12" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M3.33333 12H2" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-<span className="bf-stat3-val">£720</span><span className="bf-stat3-lbl">Group Total</span></div>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className="bf-stat3-val">£{groupTotal}</span><span className="bf-stat3-lbl">Group Total</span>
+          </div>
         </div>
 
         {/* Your Contribution */}
@@ -559,7 +570,7 @@ const BidFlow: React.FC = () => {
           </p>
         </div>
 
-        {/* Group Bids */}
+        {/* View Group Bids — expandable */}
         <div className="bf-card bf-group-bids-card">
           <button className="bf-group-bids-toggle" onClick={() => setGroupBidsOpen(o => !o)}>
             <span className="bf-card-title" style={{ margin: 0 }}>View Group Bids (Anonymous)</span>
@@ -571,10 +582,10 @@ const BidFlow: React.FC = () => {
           {groupBidsOpen && (
             <div className="bf-group-bids-list">
               {roundBids.map((b, i) => (
-                <div key={i} className={`bf-bid-row ${b.is_minimum?'bf-bid-row--min':''} ${b.is_you?'bf-bid-row--you':''}`}>
-                  <div className={`bf-bid-avatar ${b.is_you?'bf-bid-avatar--you':b.is_minimum?'bf-bid-avatar--min':''}`}>{b.initial}</div>
+                <div key={i} className={`bf-bid-row ${b.is_minimum ? 'bf-bid-row--min' : ''} ${b.is_you ? 'bf-bid-row--you' : ''}`}>
+                  <div className={`bf-bid-avatar ${b.is_you ? 'bf-bid-avatar--you' : b.is_minimum ? 'bf-bid-avatar--min' : ''}`}>{b.initial}</div>
                   <span className="bf-bid-name">{b.is_you ? 'You' : b.pseudonym}</span>
-                  <span className={`bf-bid-amount ${b.is_minimum?'bf-bid-amount--min':''}`}>£{b.amount}</span>
+                  <span className={`bf-bid-amount ${b.is_minimum ? 'bf-bid-amount--min' : ''}`}>£{b.amount}</span>
                   {b.is_minimum && <span className="bf-min-badge">min</span>}
                 </div>
               ))}
@@ -591,11 +602,9 @@ const BidFlow: React.FC = () => {
           <span className="bf-cumul-val">£{myCumulative}</span>
         </div>
 
-        {/* CTA */}
+        {/* CTA — last round or event finished → payment, else wait for next round */}
         {isLastRound || event?.status === 'finished' ? (
-          <button className="bf-orange-btn bf-full-btn" onClick={() => {
-            getPaymentSummary(eventId).then(p => { setPayment(p); setScreen('payment-intro'); });
-          }}>
+          <button className="bf-orange-btn bf-full-btn" onClick={() => setScreen('payment-intro')}>
             Make Payment <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
               <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
               <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
@@ -605,10 +614,7 @@ const BidFlow: React.FC = () => {
           <button
             className={`bf-orange-btn bf-full-btn ${round?.status !== 'open' ? 'bf-btn-disabled' : ''}`}
             disabled={round?.status !== 'open'}
-            onClick={() => {
-              setBidAmount(0); setInputVal('0');
-              setScreen('starting');
-            }}>
+            onClick={() => { setBidAmount(0); setInputVal('0'); setScreen('starting'); }}>
             {round?.status === 'open'
               ? <>Continue to Round {roundNumber + 1} <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
                   <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
@@ -619,7 +625,7 @@ const BidFlow: React.FC = () => {
           </button>
         )}
 
-        <button className="bf-quit" onClick={async () => { await quitEvent(eventId); router.goBack(); }}>Quit Event</button>
+        <button className="bf-quit" onClick={handleQuit}>Quit Event</button>
         <div style={{ height: 48 }} />
       </div>
     </IonContent></IonPage>
@@ -629,7 +635,7 @@ const BidFlow: React.FC = () => {
      SCREEN 9 — Payment Intro
   ══════════════════════════════════════════════════ */
   if (screen === 'payment-intro') return (
-    <IonPage><IonContent fullscreen className="bf-page bf-white">
+    <IonPage><IonContent fullscreen scrollY className="bf-page bf-white">
       <div className="bf-pay-intro">
         <div className="bf-pay-intro-nav">
           <button className="bf-back-circle" onClick={() => setScreen('results')}>
@@ -645,24 +651,21 @@ const BidFlow: React.FC = () => {
           </div>
           <div style={{ width: 36 }} />
         </div>
-
         <div className="bf-pay-intro-body">
           <div className="bf-heart-circle">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
               <path d="M18 28s-12-7.5-12-15a7 7 0 0114 0 7 7 0 0114 0c0 7.5-12 15-16 15z" fill="#fff"/>
             </svg>
           </div>
-          <h2 className="bf-pay-intro-title">Thank you, <strong>{payment?.donor_name ?? myPseudonym}</strong></h2>
+          <h2 className="bf-pay-intro-title">Thank you, <strong>{myPseudonym}</strong></h2>
           <p className="bf-pay-intro-sub">The event has concluded. Your final pledge is:</p>
-          <p className="bf-pay-intro-amount">£{totalDonation}</p>
-
-          <Swiper slidesPerView={1.2} centeredSlides={true} spaceBetween={14} loop={slideImages.length > 1} initialSlide={0}>
-            {slideImages.map((img, i) => (
+          <p className="bf-pay-intro-amount">£{myCumulative}</p>
+          <Swiper modules={[Pagination, EffectCoverflow]} slidesPerView={1.2} centeredSlides spaceBetween={14} loop={eventImages.length > 1}>
+            {eventImages.map((img, i) => (
               <SwiperSlide key={i}><img src={img} className="slide" alt="" /></SwiperSlide>
             ))}
           </Swiper>
         </div>
-
         <div className="bf-pay-intro-ctas">
           <button className="bf-orange-btn" onClick={() => setScreen('payment-form')}>
             Make Your Payment <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
@@ -670,19 +673,6 @@ const BidFlow: React.FC = () => {
               <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
             </svg>
           </button>
-          <button className="bf-teal-btn" onClick={handleMarkPaid}>
-            Mark as Paid Offline <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
-              <path d="M4.16699 10H15.8337" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/>
-              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/>
-            </svg>
-          </button>
-          <div className="bf-payment-status">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="7" cy="7" r="6" stroke="#2BA7A0" strokeWidth="1.2"/>
-              <path d="M7 4v3l2 1.5" stroke="#2BA7A0" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
-            <span>Payment status: Recorded</span>
-          </div>
         </div>
       </div>
     </IonContent></IonPage>
@@ -703,7 +693,6 @@ const BidFlow: React.FC = () => {
           <span className="bf-pay-form-nav-title">Payment</span>
           <div style={{ width: 36 }} />
         </div>
-
         <div className="bf-pay-summary-card">
           <div className="bf-pay-summary-event">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -712,34 +701,24 @@ const BidFlow: React.FC = () => {
             <span className="bf-pay-summary-event-name">{eventName}</span>
           </div>
           <p className="bf-pay-summary-label">Your Total Donation</p>
-          <p className="bf-pay-summary-amount">£{totalDonation}</p>
+          <p className="bf-pay-summary-amount">£{myCumulative}</p>
           <p className="bf-pay-summary-desc">Based on matched minimum bids across all rounds</p>
-          <div className="bf-pay-summary-divider" />
-          {payment?.rounds_detail?.map((r, i) => (
-            <div key={i} className="bf-pay-summary-row">
-              <span className="bf-pay-summary-row-lbl">Round {r.round}</span>
-              <span className="bf-pay-summary-row-val">£{r.matched}</span>
-            </div>
-          ))}
           <div className="bf-pay-summary-divider" />
           <div className="bf-pay-summary-row">
             <span className="bf-pay-summary-row-lbl">Processing fee</span>
-            <span className="bf-pay-summary-row-val bf-teal">Free</span>
+            <span className="bf-pay-summary-row-val bf-teal1">Free</span>
           </div>
           <div className="bf-pay-summary-divider" />
           <div className="bf-pay-summary-row bf-pay-summary-row--total">
             <span>Total</span>
-            <span>£{totalDonation}</span>
+            <span>£{myCumulative}</span>
           </div>
         </div>
-
         <div style={{ flex: 1 }} />
-
         <div className="bf-pay-form-footer">
           <div className="bf-pay-redirect-note">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="7" cy="7" r="6" stroke="#C5C8CC" strokeWidth="1.2"/>
-              <path d="M7 4v3l2 1.5" stroke="#C5C8CC" strokeWidth="1.2" strokeLinecap="round"/>
+            <svg width="12" height="15" viewBox="0 0 12 15" fill="none">
+              <path d="M11.3332 8.00026C11.3332 11.3336 8.99984 13.0003 6.2265 13.9669C6.08128 14.0161 5.92353 14.0138 5.77984 13.9603C2.99984 13.0003 0.666504 11.3336 0.666504 8.00026V3.33359C0.666504 3.15678 0.736742 2.98721 0.861766 2.86219C0.98679 2.73716 1.15636 2.66693 1.33317 2.66693C2.6665 2.66693 4.33317 1.86693 5.49317 0.853592C5.63441 0.732925 5.81407 0.666626 5.99984 0.666626C6.1856 0.666626 6.36527 0.732925 6.5065 0.853592C7.67317 1.87359 9.33317 2.66693 10.6665 2.66693C10.8433 2.66693 11.0129 2.73716 11.1379 2.86219C11.2629 2.98721 11.3332 3.15678 11.3332 3.33359V8.00026Z" stroke="#CCCCCC" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             <span>We will redirect you to {charityLink} where you can make payment.</span>
           </div>
@@ -747,7 +726,10 @@ const BidFlow: React.FC = () => {
             window.open(charityLink, '_blank');
             setScreen('receipt');
           }}>
-            Continue →
+            Continue <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
+              <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -758,7 +740,7 @@ const BidFlow: React.FC = () => {
      SCREEN 11 — Receipt / Thank You
   ══════════════════════════════════════════════════ */
   return (
-    <IonPage><IonContent fullscreen className="bf-page bf-white">
+    <IonPage><IonContent fullscreen scrollY className="bf-page bf-white">
       <div className="bf-receipt">
         <div className="bf-receipt-hero">
           <div className="bf-receipt-check">
@@ -770,25 +752,24 @@ const BidFlow: React.FC = () => {
           <h2 className="bf-receipt-hero-title">Thank You!</h2>
           <p className="bf-receipt-hero-sub">Your donation has been confirmed</p>
         </div>
-
         <div className="bf-receipt-card">
           <div className="bf-receipt-card-header">
             <div className="bf-receipt-icon">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <rect x="2" y="2" width="14" height="14" rx="3" stroke="#2BA7A0" strokeWidth="1.5"/>
-                <path d="M5 7h8M5 10h5" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round"/>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M3.3335 1.66663V18.3333L5.00016 17.5L6.66683 18.3333L8.3335 17.5L10.0002 18.3333L11.6668 17.5L13.3335 18.3333L15.0002 17.5L16.6668 18.3333V1.66663L15.0002 2.49996L13.3335 1.66663L11.6668 2.49996L10.0002 1.66663L8.3335 2.49996L6.66683 1.66663L5.00016 2.49996L3.3335 1.66663Z" stroke="#2BA7A0" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M13.3332 6.66663H8.33317C7.89114 6.66663 7.46722 6.84222 7.15466 7.15478C6.8421 7.46734 6.6665 7.89127 6.6665 8.33329C6.6665 8.77532 6.8421 9.19924 7.15466 9.5118C7.46722 9.82436 7.89114 9.99996 8.33317 9.99996H11.6665C12.1085 9.99996 12.5325 10.1756 12.845 10.4881C13.1576 10.8007 13.3332 11.2246 13.3332 11.6666C13.3332 12.1087 13.1576 12.5326 12.845 12.8451C12.5325 13.1577 12.1085 13.3333 11.6665 13.3333H6.6665" stroke="#2BA7A0" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M10 14.5833V5.41663" stroke="#2BA7A0" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
             <span className="bf-receipt-card-title">Donation Receipt</span>
           </div>
           {[
-            { label: 'Amount',    val: `£${totalDonation}`,                teal: true  },
-            { label: 'Charity',   val: payment?.charity_name ?? charityName },
-            { label: 'Event',     val: payment?.event_name  ?? eventName    },
-            { label: 'Donor',     val: myPseudonym                          },
-            { label: 'Method',    val: 'Bank Transfer'                      },
-            { label: 'Reference', val: paymentRef                           },
-            { label: 'Date',      val: paymentDate                          },
+            { label: 'Amount',  val: `£${myCumulative}`,  teal: true },
+            { label: 'Charity', val: charityName },
+            { label: 'Event',   val: eventName },
+            { label: 'Donor',   val: myPseudonym },
+            { label: 'Method',  val: 'Bank Transfer' },
+            { label: 'Date',    val: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) },
           ].map((r, i) => (
             <div key={i} className="bf-receipt-row">
               <span className="bf-receipt-lbl">{r.label}</span>
@@ -797,7 +778,6 @@ const BidFlow: React.FC = () => {
           ))}
           <p className="bf-receipt-note">A confirmation email will be sent to your registered address. This receipt can be used for tax-deduction purposes.</p>
         </div>
-
         <div className="bf-difference-card">
           <div className="bf-difference-header">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -806,14 +786,12 @@ const BidFlow: React.FC = () => {
             <span className="bf-difference-title">You made a difference</span>
           </div>
           <p className="bf-difference-desc">
-            Through peer matching, your contribution helped raise £{groupTotal} for {payment?.charity_name ?? charityName}.
+            Through peer matching, your contribution helped raise £{groupTotal} for {charityName}.
           </p>
         </div>
-
         <button className="bf-teal-btn bf-teal-btn--full" onClick={() => router.push('/devents')}>
           Back to lobby
         </button>
-
         <div style={{ height: 48 }} />
       </div>
     </IonContent></IonPage>
@@ -823,41 +801,36 @@ const BidFlow: React.FC = () => {
 /* ─────────────────────────────────────
    Shared Sub-Components
 ───────────────────────────────────── */
-interface EventCardProps {
-  eventName: string;
-  timer: string;
-  timerOrange: boolean;
-  roundLabel?: string;
-}
-
+interface EventCardProps { eventName: string; timer: string; timerOrange: boolean; roundLabel?: string; }
 const EventCard: React.FC<EventCardProps> = ({ eventName, timer, timerOrange, roundLabel }) => (
   <div className="bf-event-card">
     <div className="bf-ec-top">
       <div className="bf-ec-name">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2C5.8 2 4 3.8 4 6c0 1.8 1.1 3.3 2.6 4.2L8 14l1.4-3.8C10.9 9.3 12 7.8 12 6c0-2.2-1.8-4-4-4z" stroke="#F4A43A" strokeWidth="1.5"/>
+          <path d="M12.6663 9.33333C13.6597 8.36 14.6663 7.19333 14.6663 5.66667C14.6663 4.69421 14.28 3.76158 13.5924 3.07394C12.9048 2.38631 11.9721 2 10.9997 2C9.82634 2 8.99967 2.33333 7.99967 3.33333C6.99967 2.33333 6.17301 2 4.99967 2C4.02721 2 3.09458 2.38631 2.40695 3.07394C1.71932 3.76158 1.33301 4.69421 1.33301 5.66667C1.33301 7.2 2.33301 8.36667 3.33301 9.33333L7.99967 14L12.6663 9.33333Z" stroke="#FCB040" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
         <span>{eventName}{roundLabel ? ` · ${roundLabel}` : ''}</span>
       </div>
       <span className="bf-live-badge"><span className="bf-live-dot" />Live</span>
     </div>
     <div className={`bf-ec-timer ${timerOrange ? 'bf-ec-timer--orange' : ''}`}>
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <circle cx="7" cy="7" r="6" stroke={timerOrange ? '#F4A43A' : '#C5C8CC'} strokeWidth="1.3"/>
-        <path d="M7 4v3l2 1.5" stroke={timerOrange ? '#F4A43A' : '#C5C8CC'} strokeWidth="1.3" strokeLinecap="round"/>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <g opacity={timerOrange ? '1' : '0.2'}>
+          <path d="M6.66699 1.33337H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M8 9.33337L10 7.33337" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </g>
       </svg>
       <span>{timer}</span>
     </div>
   </div>
 );
 
-interface GroupCardProps {
-  groupName: string;
-  members: import('../../services/donorEvents').GroupMember[];
-  myPseudonym: string;
+interface GroupMemberType {
+  pseudonym: string; initial: string; emoji: string | null; is_you: boolean; bid_status: string;
 }
-
-const GroupCard: React.FC<GroupCardProps> = ({ groupName, members, myPseudonym }) => (
+interface GroupCardProps { groupName: string; members: GroupMemberType[]; }
+const GroupCard: React.FC<GroupCardProps> = ({ groupName, members }) => (
   <div className="bf-group-card">
     <div className="bf-gc-top">
       <div className="bf-gc-label-row">
@@ -872,12 +845,12 @@ const GroupCard: React.FC<GroupCardProps> = ({ groupName, members, myPseudonym }
     <p className="bf-gc-sub">
       {members.length > 1
         ? `You're matched with ${members.length - 1} other donor${members.length !== 2 ? 's' : ''}`
-        : `Waiting for others to join your group`}
+        : 'Waiting for others to join your group'}
     </p>
     <div className="bf-avatars">
       {members.map((m, i) => (
-        <div key={i} className="bf-avatar-col">
-          <div className={`bf-avatar-box ${m.is_you ? 'bf-avatar-box--you' : ''}`}>
+        <div key={i} className={`bf-avatar-col ${m.is_you ? 'bf-avatar-box--you' : ''}`}>
+          <div className="bf-avatar-box">
             <span className="bf-avatar-em">{m.emoji ?? m.initial}</span>
           </div>
           <span className={`bf-avatar-name ${m.is_you ? 'bf-avatar-name--you' : ''}`}>
@@ -887,7 +860,7 @@ const GroupCard: React.FC<GroupCardProps> = ({ groupName, members, myPseudonym }
             {m.bid_status === 'submitted' ? 'Bid placed' : m.bid_status === 'bidding' ? 'Bidding' : 'Waiting'}
           </span>
           <div className="bf-avatar-dots">
-            <span className={`bf-avatar-dot ${m.bid_status === 'bidding' || m.bid_status === 'submitted' ? 'bf-avatar-dot--on' : ''}`} />
+            <span className={`bf-avatar-dot ${m.bid_status !== 'waiting' ? 'bf-avatar-dot--on' : ''}`} />
             <span className="bf-avatar-dot" /><span className="bf-avatar-dot" />
           </div>
         </div>
@@ -897,8 +870,9 @@ const GroupCard: React.FC<GroupCardProps> = ({ groupName, members, myPseudonym }
 );
 
 const TrendIcon: React.FC<{ small?: boolean }> = ({ small }) => (
-  <svg width={small ? 14 : 18} height={small ? 14 : 18} viewBox="0 0 18 18" fill="none">
-    <path d="M2 13l4-4.5 3.5 3.5 7-9" stroke="#2BA7A0" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <path d="M14.6663 4.66663L8.99967 10.3333L5.66634 6.99996L1.33301 11.3333" stroke="#16837E" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M10.667 4.66663H14.667V8.66663" stroke="#16837E" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
 

@@ -24,9 +24,9 @@ const CreateEvent: React.FC = () => {
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
   const [date, setDate]         = useState('');  // DD-MM-YYYY display
-  const [time, setTime]         = useState('');  // display
-  const [rawDate, setRawDate]   = useState('');  // YYYY-MM-DD
-  const [rawTime, setRawTime]   = useState('');  // HH:MM
+  const [time, setTime]         = useState('');  // HH:MM display
+  const [rawDate, setRawDate]   = useState('');  // YYYY-MM-DD for backend
+  const [rawTime, setRawTime]   = useState('');  // HH:MM for backend
 
   // ─── Form fields ──────────────────────────────────────────────────────────
   const [name, setName]                 = useState('');
@@ -78,6 +78,8 @@ const CreateEvent: React.FC = () => {
     if (!validate()) return;
 
     // Combine date + time into started_at timestamp
+    // Both rawDate (YYYY-MM-DD) and rawTime (HH:MM) are parsed directly
+    // from ISO strings — no timezone shift
     const startedAt = rawDate && rawTime
       ? `${rawDate} ${rawTime}:00`
       : rawDate
@@ -99,9 +101,7 @@ const CreateEvent: React.FC = () => {
         images:        imageFiles.length ? imageFiles : undefined,
       });
 
-      //router.push('/events', 'root', 'replace');
-	  //router.push('/events', 'root');
-	  window.location.href = '/events';
+      window.location.href = '/events';
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.errors) {
@@ -180,7 +180,17 @@ const CreateEvent: React.FC = () => {
             onChange={(e) => setDescription(e.target.value)}
             disabled={loading}
             rows={3}
-            style={{ width: '100%', padding: '14px', borderRadius: '25px', border: 'none', background: '#F5F6F8', marginTop: '6px', fontFamily: 'inherit', fontSize: '14px', resize: 'none' }}
+            style={{
+              width: '100%',
+              padding: '14px',
+              borderRadius: '25px',
+              border: 'none',
+              background: '#F5F6F8',
+              marginTop: '6px',
+              fontFamily: 'inherit',
+              fontSize: '14px',
+              resize: 'none'
+            }}
           />
 
           {/* Target Amount */}
@@ -282,8 +292,12 @@ const CreateEvent: React.FC = () => {
 
         </div>
 
-        {/* DATE MODAL */}
-        <IonModal isOpen={showDate} onDidDismiss={() => setShowDate(false)}>
+        {/* ── DATE MODAL ── */}
+        <IonModal
+          isOpen={showDate}
+          onDidDismiss={() => setShowDate(false)}
+          keepContentsMounted={true}
+        >
           <div className="picker-header">
             <span onClick={() => setShowDate(false)}>←</span>
             <h3>Select Date</h3>
@@ -292,20 +306,32 @@ const CreateEvent: React.FC = () => {
             presentation="date"
             onIonChange={(e) => {
               const val = e.detail.value as string;
-              const d = new Date(val);
-              setRawDate(d.toISOString().split('T')[0]);
-              setDate(
-                String(d.getDate()).padStart(2, '0') + '-' +
-                String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                d.getFullYear()
-              );
-              setShowDate(false);
+              if (!val) return;
+
+              // Parse date directly from ISO string — no timezone shift
+              const datePart = val.split('T')[0]; // "YYYY-MM-DD"
+              const [yyyy, mm, dd] = datePart.split('-');
+
+              setRawDate(datePart);               // YYYY-MM-DD → sent to backend
+              setDate(`${dd}-${mm}-${yyyy}`);     // DD-MM-YYYY → display only
             }}
           />
+          <div style={{ padding: '0 16px 32px' }}>
+            <button
+              className="create-btn"
+              onClick={() => setShowDate(false)}
+            >
+              Confirm
+            </button>
+          </div>
         </IonModal>
 
-        {/* TIME MODAL */}
-        <IonModal isOpen={showTime} onDidDismiss={() => setShowTime(false)}>
+        {/* ── TIME MODAL ── */}
+        <IonModal
+          isOpen={showTime}
+          onDidDismiss={() => setShowTime(false)}
+          keepContentsMounted={true}
+        >
           <div className="picker-header">
             <span onClick={() => setShowTime(false)}>←</span>
             <h3>Select Time</h3>
@@ -314,14 +340,24 @@ const CreateEvent: React.FC = () => {
             presentation="time"
             onIonChange={(e) => {
               const val = e.detail.value as string;
-              const t = new Date(val);
-              const hh = String(t.getHours()).padStart(2, '0');
-              const mm = String(t.getMinutes()).padStart(2, '0');
-              setRawTime(`${hh}:${mm}`);
-              setTime(t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-              setShowTime(false);
+              if (!val) return;
+
+              // Parse HH:MM directly from ISO string — no timezone shift
+              const timePart = val.includes('T') ? val.split('T')[1] : val;
+              const [hh, mm] = timePart.split(':');
+
+              setRawTime(`${hh}:${mm}`);          // HH:MM → used in startedAt
+              setTime(`${hh}:${mm}`);             // HH:MM → display
             }}
           />
+          <div style={{ padding: '0 16px 32px' }}>
+            <button
+              className="create-btn"
+              onClick={() => setShowTime(false)}
+            >
+              Confirm
+            </button>
+          </div>
         </IonModal>
 
       </IonContent>
