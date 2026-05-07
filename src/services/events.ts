@@ -34,6 +34,7 @@ export interface Event {
   created_at:            string;
   total_raised?:         number;
   donors_count?:         number;
+  is_member?:            boolean;   // whether this donor has already joined
   // Round state
   current_round_number?: number;
   completed_rounds?:     number;
@@ -137,23 +138,25 @@ export async function updateEvent(id: number, data: {
 }
 
 // ── Donor endpoints ───────────────────────────────────────────────
- 
+
 export type DonorEventTab = 'upcoming' | 'finished';
- 
+
 /**
- * Fetches events the authenticated donor has joined.
  * GET /donor/events?tab=upcoming|finished
  *
- * Returns the same Event shape — status field drives the badge:
- *   'live'     → green "Live Event" badge
- *   'draft'    → orange countdown badge  (uses started_at for countdown)
- *   'finished' → grey "Finished" badge
+ * Returns ALL platform events (not just joined ones) filtered by tab:
+ *   upcoming  → live + draft events  (donor can join)
+ *   finished  → finished events
+ *
+ * Each event includes `is_member: boolean` so the UI can show
+ * "Already Joined" vs "Join Event" in the preview sheet.
+ *
+ * Backend returns a plain JSON array (not wrapped in { events: [] }).
  */
 export async function getDonorEvents(tab: DonorEventTab): Promise<Event[]> {
   const { data } = await api.get<Event[]>('/donor/events', { params: { tab } });
-  return data;
+  return Array.isArray(data) ? data : [];
 }
-
 
 // ── Host event lifecycle ──────────────────────────────────────────
 
