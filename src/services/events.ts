@@ -12,6 +12,7 @@ export interface CreateEventPayload {
   rounds_count:  number;
   group_size:    number;
   started_at?:   string;   // YYYY-MM-DD HH:MM:00
+  duration?:     string;   // HH:MM
   charity_link?: string;
   logo?:         File | null;
   images?:       File[];
@@ -30,11 +31,11 @@ export interface Event {
   logo?:                 string;
   images?:               string[];
   join_code:             string;
-  status:                'draft' | 'live' | 'finished';
+  status:                'draft' | 'live' | 'finished' | 'unlisted';
   created_at:            string;
   total_raised?:         number;
   donors_count?:         number;
-  is_member?:            boolean;   // whether this donor has already joined
+  is_member?:            boolean;
   // Round state
   current_round_number?: number;
   completed_rounds?:     number;
@@ -49,14 +50,17 @@ export interface Event {
 }
 
 export interface ApiDonor {
-  pseudonym:       string;
-  initial:         string;
-  bid_amount:      string | null;
-  is_quit:         boolean;
-  total_committed: string | null;
+  pseudonym:        string;
+  initial:          string;
+  bid_amount:       string | null;
+  is_quit:          boolean;
+  total_committed:  string | null;
+  group_member_id?: number;
+  emoji?:           string | null;
 }
 
 export interface ApiGroup {
+  id?:        number;
   name:       string;
   bids:       number;
   total_bids: number;
@@ -91,8 +95,20 @@ export function logoUrl(path: string | null | undefined): string | null {
   return STORAGE_URL + path;
 }
 
-export async function getEvents(): Promise<Event[]> {
-  const { data } = await api.get<Event[]>('/host/events');
+// ── Host event tab type ───────────────────────────────────────────
+
+export type HostEventTab = 'upcoming' | 'finished' | 'unlisted';
+
+/**
+ * GET /host/events?tab=upcoming|finished|unlisted
+ *
+ * Backend filters by status per tab:
+ *   upcoming  → draft + live
+ *   finished  → finished
+ *   unlisted  → unlisted
+ */
+export async function getEvents(tab: HostEventTab = 'upcoming'): Promise<Event[]> {
+  const { data } = await api.get<Event[]>('/host/events', { params: { tab } });
   return data;
 }
 
@@ -112,6 +128,7 @@ export async function createEvent(payload: CreateEventPayload): Promise<Event> {
 
   if (payload.description)  form.append('description',  payload.description);
   if (payload.started_at)   form.append('started_at',   payload.started_at);
+  if (payload.duration)     form.append('duration',     payload.duration);
   if (payload.charity_link) form.append('charity_link', payload.charity_link);
   if (payload.logo)         form.append('logo',         payload.logo);
 
@@ -137,22 +154,18 @@ export async function updateEvent(id: number, data: {
   return result;
 }
 
+/**
+ * POST /host/events/:id/unlist
+ * Move a draft or live event to the unlisted tab.
+ */
+export async function unlistEvent(id: number): Promise<void> {
+  await api.post(`/host/events/${id}/unlist`);
+}
+
 // ── Donor endpoints ───────────────────────────────────────────────
 
 export type DonorEventTab = 'upcoming' | 'finished';
 
-/**
- * GET /donor/events?tab=upcoming|finished
- *
- * Returns ALL platform events (not just joined ones) filtered by tab:
- *   upcoming  → live + draft events  (donor can join)
- *   finished  → finished events
- *
- * Each event includes `is_member: boolean` so the UI can show
- * "Already Joined" vs "Join Event" in the preview sheet.
- *
- * Backend returns a plain JSON array (not wrapped in { events: [] }).
- */
 export async function getDonorEvents(tab: DonorEventTab): Promise<Event[]> {
   const { data } = await api.get<Event[]>('/donor/events', { params: { tab } });
   return Array.isArray(data) ? data : [];
@@ -160,25 +173,43 @@ export async function getDonorEvents(tab: DonorEventTab): Promise<Event[]> {
 
 // ── Host event lifecycle ──────────────────────────────────────────
 
-/** POST /host/events/:id/start — change status draft → live */
 export async function startEvent(id: number): Promise<Event> {
   const { data } = await api.post<Event>(`/host/events/${id}/start`);
   return data;
 }
 
-/** POST /host/events/:id/end — change status live → finished */
 export async function endEvent(id: number): Promise<Event> {
   const { data } = await api.post<Event>(`/host/events/${id}/end`);
   return data;
 }
 
-/** POST /host/events/:id/rounds/start — open a new round */
 export async function startRound(id: number): Promise<{ round_id: number }> {
   const { data } = await api.post(`/host/events/${id}/rounds/start`);
   return data;
 }
 
-/** POST /host/events/:id/rounds/:rid/end — close the open round */
 export async function endRound(eventId: number, roundId: number): Promise<void> {
   await api.post(`/host/events/${eventId}/rounds/${roundId}/end`);
+}
+
+// ── Group management ─────────────────────────────────────────────
+
+export async function moveGroupMembers(
+  eventId: number,
+  fromGroupId: number,
+  toGroupId: number,
+  groupMemberIds: number[],
+): Promise<{ message: string; moved_count: number }> {
+  const { data } = await api.post(
+    `/host/events/${eventId}/groups/${fromGroupId}/move-members`,
+    { to_group_id: toGroupId, group_member_ids: groupMemberIds },
+  );
+  return data;
+}
+
+export async function rebalanceGroups(
+  eventId: number,
+): Promise<{ message: string; group_count: number; total_members: number }> {
+  const { data } = await api.post(`/host/events/${eventId}/groups/rebalance`);
+  return data;
 }

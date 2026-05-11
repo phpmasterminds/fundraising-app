@@ -14,6 +14,8 @@ import {
   endEvent,
   startRound,
   endRound,
+  moveGroupMembers,
+  rebalanceGroups,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow } from '../../services/events';
 
@@ -56,8 +58,29 @@ interface RoundData {
   groupRows: RoundGroupRow[];
 }
 
+// ── Proposed Group Allocations types ─────────────────────────────────────────
+interface PgaMember {
+  id: string;             // composite key for React list
+  groupMemberId: number;  // group_members.id — sent to API
+  name: string;
+  initial: string;
+  amount: string;
+  emoji: string;
+  selected: boolean;
+}
+
+interface PgaGroup {
+  id: number;    // groups.id
+  label: string; // "Group A"
+  members: PgaMember[];
+  expanded: boolean;
+}
+
 /* ── Color palette for donor avatars ── */
 const COLORS = ['#E6F4F2', '#FFF3E6', '#EEF1F4', '#F2F2F2'];
+
+// Fallback emoji pool when emoji is not stored on GroupMember
+const EMOJI_POOL = ['🍏','🍒','🐰','🌸','🥜','🧅','🥔','🥦','🦀','🌽','🍇','🍋','🥝','🫐','🍑'];
 
 const ViewEvent: React.FC = () => {
   const router   = useIonRouter();
@@ -84,6 +107,19 @@ const ViewEvent: React.FC = () => {
   const [apiEvent, setApiEvent]   = useState<Event | null>(null);
   const [timerSecs, setTimerSecs] = useState(0);
   const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ─── Proposed Group Allocations (PGA) state ───────────────────────────────
+  const [showPGA, setShowPGA]           = useState(false);
+  const [pgaGroups, setPgaGroups]       = useState<PgaGroup[]>([]);
+  const [pgaRoundId, setPgaRoundId]     = useState<number | null>(null);
+  const [moveSheet, setMoveSheet]       = useState<{
+    open: boolean;
+    fromGroupId: number | null;
+    selectedMemberIds: number[]; // group_member.id[]
+  }>({ open: false, fromGroupId: null, selectedMemberIds: [] });
+  const [pgaMoveLoading, setPgaMoveLoading] = useState(false);
+  const [pgaToast, setPgaToast]         = useState<string | null>(null);
+  const moveSheetRef                    = useRef<HTMLDivElement>(null);
 
   const eventId = new URLSearchParams(location.search).get('id');
 
@@ -126,40 +162,32 @@ const ViewEvent: React.FC = () => {
   const handleStartEvent = async () => {
     if (!eventId || actionLoading) return;
     setActionLoading(true);
-    try {
-      const data = await startEvent(Number(eventId));
-      setApiEvent(data);
-    } catch (e) { console.error(e); }
+    try { const data = await startEvent(Number(eventId)); setApiEvent(data); }
+    catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
 
   const handleEndEvent = async () => {
     if (!eventId || actionLoading) return;
     setActionLoading(true);
-    try {
-      const data = await endEvent(Number(eventId));
-      setApiEvent(data);
-    } catch (e) { console.error(e); }
+    try { const data = await endEvent(Number(eventId)); setApiEvent(data); }
+    catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
 
   const handleStartRound = async () => {
     if (!eventId || actionLoading) return;
     setActionLoading(true);
-    try {
-      await startRound(Number(eventId));
-      await refreshEvent();
-    } catch (e) { console.error(e); }
+    try { await startRound(Number(eventId)); await refreshEvent(); }
+    catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
 
   const handleEndRound = async () => {
     if (!eventId || actionLoading || !openRound) return;
     setActionLoading(true);
-    try {
-      await endRound(Number(eventId), openRound.id);
-      await refreshEvent();
-    } catch (e) { console.error(e); }
+    try { await endRound(Number(eventId), openRound.id); await refreshEvent(); }
+    catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
 
@@ -170,109 +198,207 @@ const ViewEvent: React.FC = () => {
     setSaveLoading(true);
     try {
       const updated = await updateEvent(Number(eventId), {
-        name:          editName,
-        charity_name:  editCharityName,
-        target_amount: Number(editTargetAmount),
+        name: editName, charity_name: editCharityName, target_amount: Number(editTargetAmount),
       });
       setApiEvent(updated);
       setShowQR(false);
     } catch (e: any) {
       setSaveError(e?.message ?? 'Failed to save. Please try again.');
-    } finally {
-      setSaveLoading(false);
-    }
+    } finally { setSaveLoading(false); }
   };
 
-  // ─── Map API groups → local Group type ────────────────────────────────────
+  // ─── Map API → local types ────────────────────────────────────────────────
   const mapGroups = (apiGroups: ApiGroup[]): Group[] =>
     apiGroups.map((g, gi) => ({
-      name:      g.name,
-      bids:      g.bids,
-      totalBids: g.total_bids,
-      min:       g.min ?? undefined,
-      alert:     g.alert,
-      status:    g.status,
-      donors:    g.donors.map((d, di) => ({
-        initial:        d.initial,
-        name:           d.pseudonym,
-        sub:            d.pseudonym,
-        bid:            d.is_quit ? null : d.bid_amount,
+      name: g.name, bids: g.bids, totalBids: g.total_bids,
+      min: g.min ?? undefined, alert: g.alert, status: g.status,
+      donors: g.donors.map((d, di) => ({
+        initial: d.initial, name: d.pseudonym, sub: d.pseudonym,
+        bid: d.is_quit ? null : d.bid_amount,
         totalCommitted: d.total_committed ?? undefined,
-        status:         d.is_quit ? 'left' : d.bid_amount ? null : 'bidding',
-        color:          COLORS[(gi + di) % COLORS.length],
+        status: d.is_quit ? 'left' : d.bid_amount ? null : 'bidding',
+        color: COLORS[(gi + di) % COLORS.length],
       })),
     }));
 
-  // ─── Map API rounds → local RoundData type ────────────────────────────────
   const mapRounds = (apiRounds: ApiRound[]): RoundData[] =>
     apiRounds.map((r) => ({
-      id:     r.id,
-      label:  `R${r.round_number}`,
-      status: r.status === 'closed' ? 'complete'
-            : r.status === 'open'   ? 'bidding'
-            : 'not-started',
-      raised: r.raised,
-      alerts: r.alerts,
-      groups: r.groups_done,
+      id: r.id, label: `R${r.round_number}`,
+      status: r.status === 'closed' ? 'complete' : r.status === 'open' ? 'bidding' : 'not-started',
+      raised: r.raised, alerts: r.alerts, groups: r.groups_done,
       groupRows: r.group_rows.map((row): RoundGroupRow => ({
-        name:        row.name,
-        status:      row.status,
-        alert:       row.alert,
-        detail:      row.detail,
-        detailColor: row.detail_color,
+        name: row.name, status: row.status, alert: row.alert,
+        detail: row.detail, detailColor: row.detail_color,
       })),
     }));
 
   // ─── Derived values ───────────────────────────────────────────────────────
-  const groups: Group[] = apiEvent?.current_groups?.length
-    ? mapGroups(apiEvent.current_groups)
-    : [];
+  const groups: Group[]     = apiEvent?.current_groups?.length ? mapGroups(apiEvent.current_groups) : [];
+  const rounds: RoundData[] = apiEvent?.rounds_overview?.length ? mapRounds(apiEvent.rounds_overview) : [];
 
-  const rounds: RoundData[] = apiEvent?.rounds_overview?.length
-    ? mapRounds(apiEvent.rounds_overview)
-    : [];
+  const totalRaised     = apiEvent?.total_raised ?? 0;
+  const targetAmount    = Number(apiEvent?.target_amount ?? 0);
+  const progressPercent = targetAmount > 0 ? Math.min(100, Math.round((totalRaised / targetAmount) * 100)) : 0;
 
-  const totalRaised      = apiEvent?.total_raised ?? 0;
-  const targetAmount     = Number(apiEvent?.target_amount ?? 0);
-  const progressPercent  = targetAmount > 0
-    ? Math.min(100, Math.round((totalRaised / targetAmount) * 100))
-    : 0;
-
-  const currentRoundNum  = apiEvent?.current_round_number ?? 0;
+  // When between rounds, fall back to completed_rounds so the round section still renders
+  const currentRoundNum = apiEvent?.current_round_number ?? apiEvent?.completed_rounds ?? 0;
   const totalRoundsCount = apiEvent?.rounds_count ?? 0;
 
   const scaleLabels = targetAmount > 0
-    ? [0.33, 0.66, 1].map(f => {
-        const v = Math.round(targetAmount * f);
-        return v >= 1000 ? `£${Math.round(v / 1000)}k` : `£${v}`;
-      })
+    ? [0.33, 0.66, 1].map(f => { const v = Math.round(targetAmount * f); return v >= 1000 ? `£${Math.round(v / 1000)}k` : `£${v}`; })
     : ['£5k', '£10k', '£15k'];
 
-  // ─── Determine open round ─────────────────────────────────────────────────
-  const openRound = rounds.find(r => r.status === 'bidding');
+  const openRound    = rounds.find(r => r.status === 'bidding');
   const hasOpenRound = !!openRound;
-  const allRoundsDone = rounds.length === totalRoundsCount &&
-    rounds.every(r => r.status === 'complete');
+  const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
+
+  // Show "Proposed Group Allocations" button when a round just closed
+  // (live event, no open round, rounds remaining, groups exist)
+  const roundJustClosed = !hasOpenRound &&
+    rounds.length > 0 &&
+    !allRoundsDone &&
+    apiEvent?.status === 'live' &&
+    (apiEvent?.current_groups?.length ?? 0) > 0;
+
+  // ─── Build PgaGroup[] from API current_groups ────────────────────────────
+  const buildPgaGroups = (apiGroups: ApiGroup[]): PgaGroup[] =>
+    apiGroups.map((g, gi) => ({
+      id:       g.id ?? gi,
+      label:    g.name,
+      expanded: gi === 0,
+      members:  g.donors.map((d, di) => ({
+        id:            `${g.id ?? gi}_${di}`,
+        groupMemberId: d.group_member_id ?? (() => { console.warn('group_member_id missing for', d.pseudonym, '— check EventController::show()'); return 0; })(),
+        name:          d.pseudonym,
+        initial:       d.initial,
+        amount:        d.bid_amount ?? '—',
+        emoji:         d.emoji ?? EMOJI_POOL[(gi * 10 + di) % EMOJI_POOL.length],
+        selected:      false,
+      })),
+    }));
+
+  const openPGA = () => {
+    if (!apiEvent?.current_groups?.length) return;
+    const lastRound = rounds.find(r => r.status === 'complete');
+    setPgaRoundId(lastRound?.id ?? null);
+    setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+    setShowPGA(true);
+  };
+
+  // ─── PGA interactions ─────────────────────────────────────────────────────
+  const pgaToggleExpand = (groupId: number) =>
+    setPgaGroups(prev => prev.map(g => g.id === groupId ? { ...g, expanded: !g.expanded } : g));
+
+  const pgaToggleMember = (groupId: number, memberId: string) =>
+    setPgaGroups(prev => prev.map(g =>
+      g.id !== groupId ? g : {
+        ...g,
+        members: g.members.map(m => m.id === memberId ? { ...m, selected: !m.selected } : m),
+      }
+    ));
+
+  const pgaOpenMoveSheet = (groupId: number) => {
+    const group = pgaGroups.find(g => g.id === groupId);
+    if (!group) return;
+    const selectedIds = group.members.filter(m => m.selected && m.groupMemberId > 0).map(m => m.groupMemberId);
+    if (selectedIds.length === 0) {
+      console.error("Move aborted: group_member_id is 0. Check EventController::show() returns group_member_id on each donor.");
+      setPgaToast("Cannot move — member IDs not loaded. Deploy the updated EventController.php first.");
+      setTimeout(() => setPgaToast(null), 3500);
+      return;
+    }
+    setMoveSheet({ open: true, fromGroupId: groupId, selectedMemberIds: selectedIds });
+  };
+
+  const pgaCloseMoveSheet = () =>
+    setMoveSheet({ open: false, fromGroupId: null, selectedMemberIds: [] });
+
+  const pgaMoveMembers = async (toGroupId: number) => {
+    const { fromGroupId, selectedMemberIds } = moveSheet;
+    if (!fromGroupId || fromGroupId === toGroupId || !eventId || selectedMemberIds.length === 0) {
+      pgaCloseMoveSheet(); return;
+    }
+
+    setPgaMoveLoading(true);
+    const toGroup   = pgaGroups.find(g => g.id === toGroupId);
+    const fromGroup = pgaGroups.find(g => g.id === fromGroupId);
+
+    // Optimistic update
+    setPgaGroups(prev => {
+      const movedMembers = (fromGroup?.members ?? [])
+        .filter(m => selectedMemberIds.includes(m.groupMemberId))
+        .map(m => ({ ...m, selected: false }));
+      return prev.map(g => {
+        if (g.id === fromGroupId)
+          return { ...g, members: g.members.filter(m => !selectedMemberIds.includes(m.groupMemberId)) };
+        if (g.id === toGroupId)
+          return { ...g, members: [...g.members, ...movedMembers] };
+        return g;
+      });
+    });
+    pgaCloseMoveSheet();
+
+    try {
+      await moveGroupMembers(Number(eventId), fromGroupId, toGroupId, selectedMemberIds);
+      const count = selectedMemberIds.length;
+      setPgaToast(`${count} member${count !== 1 ? 's' : ''} moved to ${toGroup?.label}`);
+    } catch (err) {
+      console.error(err);
+      // Rollback optimistic update
+      await refreshEvent();
+      if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+      setPgaToast('Move failed — changes reverted.');
+    } finally {
+      setPgaMoveLoading(false);
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  };
+
+  const pgaRebalance = async () => {
+    if (!eventId) return;
+    try {
+      await rebalanceGroups(Number(eventId));
+      await refreshEvent();
+      if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+      setPgaToast('Groups rebalanced');
+      setTimeout(() => setPgaToast(null), 2500);
+    } catch (err) { console.error(err); }
+  };
+
+  const pgaLaunchNextRound = async () => {
+    if (!eventId || actionLoading) return;
+    setActionLoading(true);
+    try {
+      await startRound(Number(eventId));
+      await refreshEvent();
+      setShowPGA(false);
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(false); }
+  };
+
+  const pgaTotalPeople     = pgaGroups.reduce((s, g) => s + g.members.length, 0);
+  const fromGroupForSheet  = pgaGroups.find(g => g.id === moveSheet.fromGroupId);
+
+  // Close move-sheet on backdrop tap
+  useEffect(() => {
+    if (!moveSheet.open) return;
+    const handle = (e: MouseEvent) => {
+      if (moveSheetRef.current && !moveSheetRef.current.contains(e.target as Node)) pgaCloseMoveSheet();
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [moveSheet.open]);
 
   // ─── Live summary ─────────────────────────────────────────────────────────
   const liveSummary = {
-    eventName: apiEvent?.name         ?? '—',
-    raised:    `£${totalRaised.toLocaleString()}`,
-    org:       apiEvent?.charity_name ?? '—',
-    donors:    apiEvent?.donors_count ?? 0,
-    groups:    groups.length,
+    eventName: apiEvent?.name ?? '—', raised: `£${totalRaised.toLocaleString()}`,
+    org: apiEvent?.charity_name ?? '—', donors: apiEvent?.donors_count ?? 0, groups: groups.length,
     milestones: [
       { amount: `£${Math.round(targetAmount * 0.33).toLocaleString()}`, label: 'First Milestone!', reached: totalRaised >= targetAmount * 0.33 },
       { amount: `£${Math.round(targetAmount * 0.5).toLocaleString()}`,  label: 'Half Way!',        reached: totalRaised >= targetAmount * 0.5 },
       { amount: `£${Math.round(targetAmount * 1).toLocaleString()}`,    label: 'Stretch Goal!',    reached: totalRaised >= targetAmount },
     ],
-    leaderboard: groups.map((g, i) => ({
-      rank:    i + 1,
-      name:    g.name,
-      members: g.donors.length,
-      match:   '1:3',
-      total:   g.min ?? '—',
-    })),
+    leaderboard: groups.map((g, i) => ({ rank: i + 1, name: g.name, members: g.donors.length, match: '1:3', total: g.min ?? '—' })),
   };
 
   /* ── Helpers ── */
@@ -351,7 +477,6 @@ const ViewEvent: React.FC = () => {
     const h = Math.floor((seconds % 86400) / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
-
     if (d > 0) return `${d}d ${h}h ${m}m`;
     if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m ${s}s`;
@@ -379,8 +504,8 @@ const ViewEvent: React.FC = () => {
                   onClick={() => { const s = showSettings; closeAll(); setShowSettings(!s); }}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M8.14667 1.3335H7.85333C7.49971 1.3335 7.16057 1.47397 6.91053 1.72402C6.66048 1.97407 6.52 2.31321 6.52 2.66683V2.78683C6.51976 3.02065 6.45804 3.25029 6.34103 3.45272C6.22401 3.65515 6.05583 3.82325 5.85333 3.94016L5.56667 4.10683C5.36398 4.22385 5.13405 4.28546 4.9 4.28546C4.66595 4.28546 4.43603 4.22385 4.23333 4.10683L4.13333 4.0535C3.82738 3.877 3.46389 3.82913 3.12267 3.92037C2.78145 4.01161 2.49037 4.23452 2.31333 4.54016L2.16667 4.7935C1.99018 5.09945 1.9423 5.46294 2.03354 5.80416C2.12478 6.14539 2.34769 6.43646 2.65333 6.6135L2.75333 6.68016C2.95485 6.7965 3.12241 6.96356 3.23937 7.16472C3.35632 7.36588 3.4186 7.59414 3.42 7.82683V8.16683C3.42093 8.40178 3.35977 8.6328 3.2427 8.8365C3.12563 9.04021 2.95681 9.20936 2.75333 9.32683L2.65333 9.38683C2.34769 9.56386 2.12478 9.85494 2.03354 10.1962C1.9423 10.5374 1.99018 10.9009 2.16667 11.2068L2.31333 11.4602C2.49037 11.7658 2.78145 11.9887 3.12267 12.08C3.46389 12.1712 3.82738 12.1233 4.13333 11.9468L4.23333 11.8935C4.43603 11.7765 4.66595 11.7149 4.9 11.7149C5.13405 11.7149 5.36398 11.7765 5.56667 11.8935L5.85333 12.0602C6.05583 12.1771 6.22401 12.3452 6.34103 12.5476C6.45804 12.75 6.51976 12.9797 6.52 13.2135V13.3335C6.52 13.6871 6.66048 14.0263 6.91053 14.2763C7.16057 14.5264 7.49971 14.6668 7.85333 14.6668H8.14667C8.50029 14.6668 8.83943 14.5264 9.08948 14.2763C9.33953 14.0263 9.48 13.6871 9.48 13.3335V13.2135C9.48024 12.9797 9.54196 12.75 9.65898 12.5476C9.77599 12.3452 9.94418 12.1771 10.1467 12.0602L10.4333 11.8935C10.636 11.7765 10.866 11.7149 11.1 11.7149C11.3341 11.7149 11.564 11.7765 11.7667 11.8935L11.8667 11.9468C12.1726 12.1233 12.5361 12.1712 12.8773 12.08C13.2186 11.9887 13.5096 11.7658 13.6867 11.4602L13.8333 11.2002C14.0098 10.8942 14.0577 10.5307 13.9665 10.1895C13.8752 9.84827 13.6523 9.5572 13.3467 9.38016L13.2467 9.32683C13.0432 9.20936 12.8744 9.04021 12.7573 8.8365C12.6402 8.6328 12.5791 8.40178 12.58 8.16683V7.8335C12.5791 7.59855 12.6402 7.36753 12.7573 7.16382C12.8744 6.96012 13.0432 6.79097 13.2467 6.6735L13.3467 6.6135C13.6523 6.43646 13.8752 6.14539 13.9665 5.80416C14.0577 5.46294 14.0098 5.09945 13.8333 4.7935L13.6867 4.54016C13.5096 4.23452 13.2186 4.01161 12.8773 3.92037C12.5361 3.82913 12.1726 3.877 11.8667 4.0535L11.7667 4.10683C11.564 4.22385 11.3341 4.28546 11.1 4.28546C10.866 4.28546 10.636 4.22385 10.4333 4.10683L10.1467 3.94016C9.94418 3.82325 9.77599 3.65515 9.65898 3.45272C9.54196 3.25029 9.48024 3.02065 9.48 2.78683V2.66683C9.48 2.31321 9.33953 1.97407 9.08948 1.72402C8.83943 1.47397 8.50029 1.3335 8.14667 1.3335Z" stroke={showSettings ? '#fff' : '#1A1A2E'} stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10C9.10457 10 10 9.10457 10 8C10 6.89543 9.10457 6 8 6C6.89543 6 6 6.89543 6 8C6 9.10457 6.89543 10 8 10Z" stroke={showSettings ? '#fff' : '#1A1A2E'} stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M8.14667 1.3335H7.85333C7.49971 1.3335 7.16057 1.47397 6.91053 1.72402C6.66048 1.97407 6.52 2.31321 6.52 2.66683V2.78683C6.51976 3.02065 6.45804 3.25029 6.34103 3.45272C6.22401 3.65515 6.05583 3.82325 5.85333 3.94016L5.56667 4.10683C5.36398 4.22385 5.13405 4.28546 4.9 4.28546C4.66595 4.28546 4.43603 4.22385 4.23333 4.10683L4.13333 4.0535C3.82738 3.877 3.46389 3.82913 3.12267 3.92037C2.78145 4.01161 2.49037 4.23452 2.31333 4.54016L2.16667 4.7935C1.99018 5.09945 1.9423 5.46294 2.03354 5.80416C2.12478 6.14539 2.34769 6.43646 2.65333 6.6135L2.75333 6.68016C2.95485 6.7965 3.12241 6.96356 3.23937 7.16472C3.35632 7.36588 3.4186 7.59414 3.42 7.82683V8.16683C3.42093 8.40178 3.35977 8.6328 3.2427 8.8365C3.12563 9.04021 2.95681 9.20936 2.75333 9.32683L2.65333 9.38683C2.34769 9.56386 2.12478 9.85494 2.03354 10.1962C1.9423 10.5374 1.99018 10.9009 2.16667 11.2068L2.31333 11.4602C2.49037 11.7658 2.78145 11.9887 3.12267 12.08C3.46389 12.1712 3.82738 12.1233 4.13333 11.9468L4.23333 11.8935C4.43603 11.7765 4.66595 11.7149 4.9 11.7149C5.13405 11.7149 5.36398 11.7765 5.56667 11.8935L5.85333 12.0602C6.05583 12.1771 6.22401 12.3452 6.34103 12.5476C6.45804 12.75 6.51976 12.9797 6.52 13.2135V13.3335C6.52 13.6871 6.66048 14.0263 6.91053 14.2763C7.16057 14.5264 7.49971 14.6668 7.85333 14.6668H8.14667C8.50029 14.6668 8.83943 14.5264 9.08948 14.2763C9.33953 14.0263 9.48 13.6871 9.48 13.3335V13.2135C9.48024 12.9797 9.54196 12.75 9.65898 12.5476C9.77599 12.3452 9.94418 12.1771 10.1467 12.0602L10.4333 11.8935C10.636 11.7765 10.866 11.7149 11.1 11.7149C11.3341 11.7149 11.564 11.7765 11.7667 11.8935L11.8667 11.9468C12.1726 12.1233 12.5361 12.1712 12.8773 12.08C13.2186 11.9887 13.5096 11.7658 13.6867 11.4602L13.8333 11.2002C14.0098 10.8942 14.0577 10.5307 13.9665 10.1895C13.8752 9.84827 13.6523 9.5572 13.3467 9.38016L13.2467 9.32683C13.0432 9.20936 12.8744 9.04021 12.7573 8.8365C12.6402 8.6328 12.5791 8.40178 12.58 8.16683V7.8335C12.5791 7.59855 12.6402 7.36753 12.7573 7.16382C12.8744 6.96012 13.0432 6.79097 13.2467 6.6735L13.3467 6.6135C13.6523 6.43646 13.8752 6.14539 13.9665 5.80416C14.0577 5.46294 14.0098 5.09945 13.8333 4.7935L13.6867 4.54016C13.5096 4.23452 13.2186 4.01161 12.8773 3.92037C12.5361 3.82913 12.1726 3.877 11.8667 4.0535L11.7667 4.10683C11.564 4.22385 11.3341 4.28546 11.1 4.28546C10.866 4.28546 10.636 4.22385 10.4333 4.10683L10.1467 3.94016C9.94418 3.82325 9.77599 3.65515 9.65898 3.45272C9.54196 3.25029 9.48024 3.02065 9.48 2.78683V2.66683C9.48 2.31321 9.33953 1.97407 9.08948 1.72402C8.83943 1.47397 8.50029 1.3335 8.14667 1.3335Z" stroke={showSettings ? '#fff' : '#1A1A2E'} strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M8 10C9.10457 10 10 9.10457 10 8C10 6.89543 9.10457 6 8 6C6.89543 6 6 6.89543 6 8C6 9.10457 6.89543 10 8 10Z" stroke={showSettings ? '#fff' : '#1A1A2E'} strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
 </svg>
                 </div>
               </>
@@ -391,12 +516,9 @@ const ViewEvent: React.FC = () => {
           <div className="ve-live-badge">
             <span className="ve-live-dot" style={{
               background: apiEvent?.status === 'live'     ? '#2BA7A0'
-                        : apiEvent?.status === 'finished' ? '#9AA0A6'
-                        : '#F4A43A'
+                        : apiEvent?.status === 'finished' ? '#9AA0A6' : '#F4A43A'
             }} />
-            {apiEvent?.status === 'live'     ? 'Live Event'
-           : apiEvent?.status === 'finished' ? 'Finished'
-           : 'Draft'}
+            {apiEvent?.status === 'live' ? 'Live Event' : apiEvent?.status === 'finished' ? 'Finished' : 'Draft'}
           </div>
           <h1 className="ve-event-title">{apiEvent?.name ?? '—'}</h1>
           <p className="ve-event-org">{apiEvent?.charity_name ?? '—'}</p>
@@ -439,10 +561,9 @@ const ViewEvent: React.FC = () => {
           <div className="ve-event-info">
             <div className="ve-stats-row">
               <div className="ve-stat-card" style={{ cursor: 'pointer' }} onClick={() => { closeAll(); setShowLiveSummary(true); }}>
-                
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M14.6663 4.6665L8.99967 10.3332L5.66634 6.99984L1.33301 11.3332" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10.667 4.6665H14.667V8.6665" stroke="#2BA7A0" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M14.6663 4.6665L8.99967 10.3332L5.66634 6.99984L1.33301 11.3332" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M10.667 4.6665H14.667V8.6665" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
                 <p className="ve-stat-value">£{totalRaised.toLocaleString()}</p>
                 <p className="ve-stat-label">Raised</p>
@@ -462,12 +583,11 @@ const ViewEvent: React.FC = () => {
                   <circle cx="10" cy="10" r="4" stroke="#2BA7A0" strokeWidth="1.6" />
                   <circle cx="10" cy="10" r="1" fill="#2BA7A0" />
                 </svg>
-                <p className="ve-stat-value">{currentRoundNum}/{totalRoundsCount}</p>
+                <p className="ve-stat-value">{apiEvent?.completed_rounds ?? currentRoundNum}/{totalRoundsCount}</p>
                 <p className="ve-stat-label">Round</p>
               </div>
             </div>
 
-            {/* Progress Bar */}
             <div className="ve-progress-card">
               <div className="ve-progress-header">
                 <span className="ve-progress-label">Progress to Target</span>
@@ -482,79 +602,76 @@ const ViewEvent: React.FC = () => {
             </div>
           </div>
 
-          {/* ── Alert Banner ── */}
           {apiEvent?.active_alert && (
             <div className="ve-alert-banner">
               <div className="ve-alert-left">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M18.108 14.9999L11.4414 3.33319C11.296 3.0767 11.0852 2.86335 10.8305 2.71492C10.5757 2.56649 10.2862 2.48828 9.99136 2.48828C9.69654 2.48828 9.40699 2.56649 9.15226 2.71492C8.89753 2.86335 8.68673 3.0767 8.54136 3.33319L1.8747 14.9999C1.72777 15.2543 1.65072 15.5431 1.65137 15.837C1.65202 16.1308 1.73035 16.4192 1.8784 16.673C2.02646 16.9269 2.23899 17.137 2.49444 17.2822C2.7499 17.4274 3.0392 17.5025 3.33303 17.4999H16.6664C16.9588 17.4996 17.246 17.4223 17.4991 17.2759C17.7522 17.1295 17.9624 16.9191 18.1085 16.6658C18.2545 16.4125 18.3314 16.1252 18.3313 15.8328C18.3312 15.5404 18.2542 15.2531 18.108 14.9999Z" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10 7.5V10.8333" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M10 14.1665H10.0083" stroke="#FCB040" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+<path d="M18.108 14.9999L11.4414 3.33319C11.296 3.0767 11.0852 2.86335 10.8305 2.71492C10.5757 2.56649 10.2862 2.48828 9.99136 2.48828C9.69654 2.48828 9.40699 2.56649 9.15226 2.71492C8.89753 2.86335 8.68673 3.0767 8.54136 3.33319L1.8747 14.9999C1.72777 15.2543 1.65072 15.5431 1.65137 15.837C1.65202 16.1308 1.73035 16.4192 1.8784 16.673C2.02646 16.9269 2.23899 17.137 2.49444 17.2822C2.7499 17.4274 3.0392 17.5025 3.33303 17.4999H16.6664C16.9588 17.4996 17.246 17.4223 17.4991 17.2759C17.7522 17.1295 17.9624 16.9191 18.1085 16.6658C18.2545 16.4125 18.3314 16.1252 18.3313 15.8328C18.3312 15.5404 18.2542 15.2531 18.108 14.9999Z" stroke="#FCB040" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M10 7.5V10.8333" stroke="#FCB040" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M10 14.1665H10.0083" stroke="#FCB040" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
                 <span className="ve-alert-text">{apiEvent.active_alert}</span>
               </div>
               <span className="ve-alert-chevron">›</span>
             </div>
           )}
 
-          {/* ── Round Header ── */}
-          {currentRoundNum > 0 && (
-            <div className="ve-round-header">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6 2H2.66667C2.29848 2 2 2.29848 2 2.66667V6C2 6.36819 2.29848 6.66667 2.66667 6.66667H6C6.36819 6.66667 6.66667 6.36819 6.66667 6V2.66667C6.66667 2.29848 6.36819 2 6 2Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M13.333 2H9.99967C9.63148 2 9.33301 2.29848 9.33301 2.66667V6C9.33301 6.36819 9.63148 6.66667 9.99967 6.66667H13.333C13.7012 6.66667 13.9997 6.36819 13.9997 6V2.66667C13.9997 2.29848 13.7012 2 13.333 2Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M13.333 9.33301H9.99967C9.63148 9.33301 9.33301 9.63148 9.33301 9.99967V13.333C9.33301 13.7012 9.63148 13.9997 9.99967 13.9997H13.333C13.7012 13.9997 13.9997 13.7012 13.9997 13.333V9.99967C13.9997 9.63148 13.7012 9.33301 13.333 9.33301Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 9.3335H2.66667C2.29848 9.3335 2 9.63197 2 10.0002V13.3335C2 13.7017 2.29848 14.0002 2.66667 14.0002H6C6.36819 14.0002 6.66667 13.7017 6.66667 13.3335V10.0002C6.66667 9.63197 6.36819 9.3335 6 9.3335Z" stroke="#6B7280" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span className="ve-round-title">Round {currentRoundNum}</span>
-              <div className="ve-round-timer">
-              
-<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g opacity="0.997358">
-<path d="M6.66699 1.3335H9.33366" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 9.3335L10 7.3335" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-</g>
+          {(currentRoundNum > 0 || groups.length > 0) && (
+            <div className="ve-round-section">
+              <div className="ve-round-header">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6 2H2.66667C2.29848 2 2 2.29848 2 2.66667V6C2 6.36819 2.29848 6.66667 2.66667 6.66667H6C6.36819 6.66667 6.66667 6.36819 6.66667 6V2.66667C6.66667 2.29848 6.36819 2 6 2Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M13.333 2H9.99967C9.63148 2 9.33301 2.29848 9.33301 2.66667V6C9.33301 6.36819 9.63148 6.66667 9.99967 6.66667H13.333C13.7012 6.66667 13.9997 6.36819 13.9997 6V2.66667C13.9997 2.29848 13.7012 2 13.333 2Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M13.333 9.33301H9.99967C9.63148 9.33301 9.33301 9.63148 9.33301 9.99967V13.333C9.33301 13.7012 9.63148 13.9997 9.99967 13.9997H13.333C13.7012 13.9997 13.9997 13.7012 13.9997 13.333V9.99967C13.9997 9.63148 13.7012 9.33301 13.333 9.33301Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M6 9.3335H2.66667C2.29848 9.3335 2 9.63197 2 10.0002V13.3335C2 13.7017 2.29848 14.0002 2.66667 14.0002H6C6.36819 14.0002 6.66667 13.7017 6.66667 13.3335V10.0002C6.66667 9.63197 6.36819 9.3335 6 9.3335Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                {apiEvent?.current_round_timer
-                  ? `${apiEvent.current_round_timer.human} · ${formatElapsed(apiEvent.current_round_timer.seconds)}`
-                  : '—'
-                }
+                <span className="ve-round-title">Round {currentRoundNum}</span>
+                {apiEvent?.current_round_timer && (
+                  <div className="ve-round-timer">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M6.66699 1.3335H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8 9.3335L10 7.3335" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {`${apiEvent.current_round_timer.human} · ${formatElapsed(apiEvent.current_round_timer.seconds)}`}
+                  </div>
+                )}
+                <span className="ve-round-complete">{hasOpenRound ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>
               </div>
-              <span className="ve-round-complete">{apiEvent?.round_progress ?? '0/0 Complete'}</span>
+
+              {groups.length > 0 ? (
+                <div className="ve-group-grid">
+                  {groups.map((group, i) => (
+                    <div key={i} className={getGroupCardClass(group.status)} onClick={() => setSelectedGroup(group)}>
+                      <div className="ve-group-header">
+                        <span className="ve-group-name">{group.name}</span>
+                        {getStatusIcon(group.status)}
+                      </div>
+                      <div className="ve-bid-dots">{renderDots(group.bids, group.totalBids, group.status)}</div>
+                      <div className="ve-group-bids">{group.bids}/{group.totalBids} bids</div>
+                      {group.min && <div className="ve-group-min">Min: {group.min}</div>}
+                      {group.alert && (
+                        <div className="ve-group-alert">
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M10.865 9L6.865 2C6.778 1.846 6.652 1.718 6.499 1.629C6.346 1.54 6.172 1.493 5.995 1.493C5.818 1.493 5.645 1.54 5.492 1.629C5.339 1.718 5.212 1.846 5.125 2L1.125 9C1.037 9.153 0.991 9.326 0.991 9.502C0.991 9.679 1.039 9.852 1.127 10.004C1.216 10.156 1.344 10.282 1.497 10.37C1.65 10.457 1.824 10.502 2 10.5H10C10.176 10.5 10.348 10.454 10.5 10.366C10.652 10.278 10.778 10.152 10.866 9.999C10.953 9.848 10.999 9.675 10.999 9.5C10.999 9.324 10.953 9.152 10.865 9Z" stroke="#C5821F" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M6 4.5V6.5" stroke="#C5821F" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M6 8.5H6.005" stroke="#C5821F" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                          Alert
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="ve-no-groups">No groups yet — waiting for donors to bid</div>
+              )}
             </div>
           )}
 
-          {/* ── Group Grid ── */}
-          {groups.length > 0 ? (
-            <div className="ve-group-grid">
-              {groups.map((group, i) => (
-                <div key={i} className={getGroupCardClass(group.status)} onClick={() => setSelectedGroup(group)}>
-                  <div className="ve-group-header">
-                    <span className="ve-group-name">{group.name}</span>
-                    {getStatusIcon(group.status)}
-                  </div>
-                  <div className="ve-bid-dots">{renderDots(group.bids, group.totalBids, group.status)}</div>
-                  <div className="ve-group-bids">{group.bids}/{group.totalBids} bids</div>
-                  {group.min && <div className="ve-group-min">Min: {group.min}</div>}
-                  {group.alert && <div className="ve-group-alert"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_106_2447)">
-<path d="M10.8652 9.00011L6.86521 2.00011C6.77799 1.84621 6.65151 1.71821 6.49867 1.62915C6.34583 1.54009 6.1721 1.49316 5.99521 1.49316C5.81831 1.49316 5.64459 1.54009 5.49175 1.62915C5.33891 1.71821 5.21243 1.84621 5.12521 2.00011L1.12521 9.00011C1.03705 9.15279 0.990823 9.32606 0.991213 9.50237C0.991604 9.67867 1.0386 9.85174 1.12743 10.004C1.21627 10.1563 1.34378 10.2824 1.49706 10.3695C1.65033 10.4566 1.82391 10.5017 2.00021 10.5001H10.0002C10.1757 10.4999 10.348 10.4536 10.4998 10.3658C10.6517 10.2779 10.7778 10.1517 10.8655 9.99967C10.9531 9.84768 10.9992 9.67531 10.9992 9.49986C10.9991 9.32441 10.9529 9.15206 10.8652 9.00011Z" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 4.5V6.5" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M6 8.5H6.005" stroke="#C5821F" stroke-linecap="round" stroke-linejoin="round"/>
-</g>
-<defs>
-<clipPath id="clip0_106_2447">
-<rect width="12" height="12" fill="white"/>
-</clipPath>
-</defs>
-</svg> Alert</div>}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '30px 0', color: '#9AA0A6', fontSize: 14 }}>
-              {apiEvent?.status === 'draft' ? 'Launch the event to start accepting donors' : 'No active round yet'}
+          {currentRoundNum === 0 && groups.length === 0 && (
+            <div className="ve-no-groups">
+              {apiEvent?.status === 'draft' ? 'Launch the event to start accepting donors' : 'Start a round to see groups'}
             </div>
           )}
         </div>
@@ -562,60 +679,41 @@ const ViewEvent: React.FC = () => {
         {/* ══ BOTTOM ACTIONS ══ */}
         <div className="ve-bottom-area">
 
-          {/* DRAFT → Launch Event */}
           {apiEvent?.status === 'draft' && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleStartEvent}
-            >
+            <div className="ve-launch-btn" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={handleStartEvent}>
               {actionLoading ? 'Launching…' : '🚀 Launch Event'}
             </div>
           )}
 
-          {/* LIVE + no open round + rounds remaining → Start Round */}
-          {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#2BA7A0', boxShadow: '0 6px 15px rgba(43,167,160,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleStartRound}
-            >
-              {actionLoading ? 'Starting…' : `▶ Start Round ${rounds.length + 1}`}
+          {/* ── NEW: After round closes — show Proposed Group Allocations button ── */}
+          {roundJustClosed && (
+            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={openPGA}>
+              Proposed Group Allocations →
             </div>
           )}
 
-          {/* LIVE + open round → End Round (Call Time) */}
+          {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && !roundJustClosed && (
+            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={handleStartRound}>
+              {actionLoading ? 'Starting…' : `Launch Round ${rounds.length + 1} →`}
+            </div>
+          )}
+
           {apiEvent?.status === 'live' && hasOpenRound && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#E53E3E', boxShadow: '0 6px 15px rgba(229,62,62,0.35)', opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleEndRound}
-            >
-              {actionLoading ? 'Ending…' : '⏹ Call Time (End Round)'}
+            <div className="ve-call-time-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={handleEndRound}>
+              <span className="ve-call-time-icon">■</span>
+              {actionLoading ? 'Ending…' : 'Call Time (End Round)'}
             </div>
           )}
 
-          {/* LIVE → End Event */}
           {apiEvent?.status === 'live' && (
-            <div
-              className="ve-end-btn"
-              style={{ opacity: actionLoading ? 0.6 : 1 }}
-              onClick={handleEndEvent}
-            >
+            <div className="ve-end-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={handleEndEvent}>
               {actionLoading ? 'Ending…' : 'End Event'}
             </div>
           )}
 
-          {/* FINISHED */}
           {apiEvent?.status === 'finished' && (
-            <div
-              className="ve-launch-btn"
-              style={{ background: '#9AA0A6', boxShadow: 'none', cursor: 'default' }}
-            >
-              Event Finished
-            </div>
+            <div className="ve-launch-btn" style={{ background: '#9AA0A6', boxShadow: 'none', cursor: 'default' }}>Event Finished</div>
           )}
-
         </div>
 
         {/* ══ QR / Setup Sheet ══ */}
@@ -624,100 +722,40 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowQR(false)} />
             <div className="ve-sheet ve-sheet--full">
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowQR(false)}>
-                  <img src="/assets/img/Back.svg" alt="back" />
-                </div>
+                <div className="ve-back-btn" onClick={() => setShowQR(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Setup &amp; QR</span>
                 <div style={{ width: 36 }} />
               </div>
-
               <div className="ve-qr-section-title">Join Information</div>
               <div className="ve-qr-box">
-                {/* ── QR generated from join_code ── */}
                 {apiEvent?.join_code ? (
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(
-                      `${window.location.origin}/join?code=${apiEvent.join_code}`
-                    )}`}
-                    alt="QR Code"
-                    style={{ width: 180, height: 180, objectFit: 'contain' }}
-                  />
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(`${window.location.origin}/join?code=${apiEvent.join_code}`)}`} alt="QR Code" style={{ width: 180, height: 180, objectFit: 'contain' }} />
                 ) : (
-                  <div style={{
-                    width: 180, height: 180,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#9AA0A6', fontSize: 13, border: '1px dashed #C4C4C4', borderRadius: 8
-                  }}>
-                    No QR yet
-                  </div>
+                  <div style={{ width: 180, height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9AA0A6', fontSize: 13, border: '1px dashed #C4C4C4', borderRadius: 8 }}>No QR yet</div>
                 )}
-                <button className="ve-qr-share-btn">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M15.8331 7.31021L10.1187 1.59582C10.0388 1.51585 9.93705 1.46137 9.82621 1.43926C9.71537 1.41715 9.60046 1.42841 9.49602 1.47161C9.39157 1.51481 9.30229 1.58801 9.23945 1.68196C9.17661 1.7759 9.14304 1.88637 9.14299 1.9994V4.8816C7.2901 5.04017 5.24363 5.94733 3.56002 7.37522C1.53284 9.09525 0.270676 11.3117 0.00567097 13.616C-0.0150382 13.7952 0.0212866 13.9763 0.109476 14.1336C0.197665 14.2909 0.333225 14.4164 0.496864 14.4922C0.660503 14.568 0.843883 14.5903 1.02091 14.5559C1.19793 14.5214 1.35958 14.432 1.48284 14.3003C2.26857 13.4639 5.06434 10.8189 9.14299 10.586V13.4282C9.14304 13.5412 9.17661 13.6517 9.23945 13.7456C9.30229 13.8396 9.39157 13.9128 9.49602 13.956C9.60046 13.9992 9.71537 14.0104 9.82621 13.9883C9.93705 13.9662 10.0388 13.9117 10.1187 13.8318L15.8331 8.11737C15.94 8.01025 16 7.86511 16 7.71379C16 7.56248 15.94 7.41734 15.8331 7.31021ZM10.2859 12.0489V9.99955C10.2859 9.848 10.2257 9.70265 10.1185 9.59548C10.0113 9.48832 9.86598 9.42811 9.71443 9.42811C7.70868 9.42811 5.75507 9.95169 3.90789 10.9853C2.96712 11.514 2.09058 12.1497 1.2957 12.8796C1.70999 11.1767 2.7543 9.5574 4.29933 8.24666C5.95793 6.84021 7.98225 5.99947 9.71443 5.99947C9.86598 5.99947 10.0113 5.93927 10.1185 5.8321C10.2257 5.72494 10.2859 5.57959 10.2859 5.42804V3.37942L14.621 7.71379L10.2859 12.0489Z" fill="#25201D"/>
-</svg>
-                </button>
               </div>
-
               <div className="ve-qr-section-title" style={{ marginTop: 20 }}>Public Join Link</div>
               <div className="ve-join-link-box">
-                <span className="ve-join-link-text">
-                  {`${window.location.origin}/join?code=${apiEvent?.join_code ?? ''}`}
-                </span>
-                <button className="ve-qr-share-btn ve-qr-share-btn--sm">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M15.8331 7.31021L10.1187 1.59582C10.0388 1.51585 9.93705 1.46137 9.82621 1.43926C9.71537 1.41715 9.60046 1.42841 9.49602 1.47161C9.39157 1.51481 9.30229 1.58801 9.23945 1.68196C9.17661 1.7759 9.14304 1.88637 9.14299 1.9994V4.8816C7.2901 5.04017 5.24363 5.94733 3.56002 7.37522C1.53284 9.09525 0.270676 11.3117 0.00567097 13.616C-0.0150382 13.7952 0.0212866 13.9763 0.109476 14.1336C0.197665 14.2909 0.333225 14.4164 0.496864 14.4922C0.660503 14.568 0.843883 14.5903 1.02091 14.5559C1.19793 14.5214 1.35958 14.432 1.48284 14.3003C2.26857 13.4639 5.06434 10.8189 9.14299 10.586V13.4282C9.14304 13.5412 9.17661 13.6517 9.23945 13.7456C9.30229 13.8396 9.39157 13.9128 9.49602 13.956C9.60046 13.9992 9.71537 14.0104 9.82621 13.9883C9.93705 13.9662 10.0388 13.9117 10.1187 13.8318L15.8331 8.11737C15.94 8.01025 16 7.86511 16 7.71379C16 7.56248 15.94 7.41734 15.8331 7.31021ZM10.2859 12.0489V9.99955C10.2859 9.848 10.2257 9.70265 10.1185 9.59548C10.0113 9.48832 9.86598 9.42811 9.71443 9.42811C7.70868 9.42811 5.75507 9.95169 3.90789 10.9853C2.96712 11.514 2.09058 12.1497 1.2957 12.8796C1.70999 11.1767 2.7543 9.5574 4.29933 8.24666C5.95793 6.84021 7.98225 5.99947 9.71443 5.99947C9.86598 5.99947 10.0113 5.93927 10.1185 5.8321C10.2257 5.72494 10.2859 5.57959 10.2859 5.42804V3.37942L14.621 7.71379L10.2859 12.0489Z" fill="#25201D"/>
-</svg>
-                </button>
+                <span className="ve-join-link-text">{`${window.location.origin}/join?code=${apiEvent?.join_code ?? ''}`}</span>
               </div>
-
               <div className="ve-qr-divider" />
               <div className="ve-qr-section-title">Event Configuration</div>
-
-              {saveError && (
-                <div style={{ color: '#E53E3E', fontSize: 13, padding: '0 16px 8px' }}>{saveError}</div>
-              )}
-
+              {saveError && <div style={{ color: '#E53E3E', fontSize: 13, padding: '0 16px 8px' }}>{saveError}</div>}
               <div className="ve-config-field">
                 <label className="ve-config-label">Event Name</label>
-                <input
-                  className="ve-config-input"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" value={editName} onChange={(e) => setEditName(e.target.value)} disabled={saveLoading} />
               </div>
               <div className="ve-config-field">
                 <label className="ve-config-label">Charity Name</label>
-                <input
-                  className="ve-config-input"
-                  value={editCharityName}
-                  onChange={(e) => setEditCharityName(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" value={editCharityName} onChange={(e) => setEditCharityName(e.target.value)} disabled={saveLoading} />
               </div>
               <div className="ve-config-field">
                 <label className="ve-config-label">Target Amount (£)</label>
-                <input
-                  className="ve-config-input"
-                  type="number"
-                  value={editTargetAmount}
-                  onChange={(e) => setEditTargetAmount(e.target.value)}
-                  disabled={saveLoading}
-                />
+                <input className="ve-config-input" type="number" value={editTargetAmount} onChange={(e) => setEditTargetAmount(e.target.value)} disabled={saveLoading} />
               </div>
-
               <div style={{ height: 100 }} />
               <div className="ve-bottom-area" style={{ background: 'linear-gradient(to top,#fff 80%,transparent)' }}>
-                <div
-                  className="ve-launch-btn"
-                  style={{
-                    background: '#2BA7A0',
-                    boxShadow: '0 6px 15px rgba(43,167,160,0.35)',
-                    opacity: saveLoading ? 0.6 : 1,
-                    cursor: saveLoading ? 'not-allowed' : 'pointer',
-                  }}
-                  onClick={handleSave}
-                >
+                <div className="ve-launch-btn" style={{ background: '#2BA7A0', boxShadow: '0 6px 15px rgba(43,167,160,0.35)', opacity: saveLoading ? 0.6 : 1, cursor: saveLoading ? 'not-allowed' : 'pointer' }} onClick={handleSave}>
                   {saveLoading ? 'Saving…' : 'Save'}
                 </div>
               </div>
@@ -731,9 +769,7 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowAllDonors(false)} />
             <div className="ve-sheet ve-sheet--full">
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowAllDonors(false)}>
-                  <img src="/assets/img/Back.svg" alt="back" />
-                </div>
+                <div className="ve-back-btn" onClick={() => setShowAllDonors(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
                 <span className="ve-sheet-topbar-title">All Donors</span>
                 <span className="ve-active-badge">{apiEvent?.donors_count ?? 0} Active</span>
               </div>
@@ -757,23 +793,17 @@ const ViewEvent: React.FC = () => {
                           )}
                           <div className="ve-all-donor-col">
                             <span className="ve-all-donor-col-label">Current round bid</span>
-                            {donor.status === 'bidding'
-                              ? <span className="ve-donor-bidding-orange">Bidding...</span>
-                              : donor.status === 'left'
-                                ? <span className="ve-left-event-chip">Left Event</span>
-                                : donor.bid
-                                  ? <span className="ve-all-donor-col-val">{donor.bid}</span>
-                                  : <span className="ve-donor-bidding">—</span>
-                            }
+                            {donor.status === 'bidding' ? <span className="ve-donor-bidding-orange">Bidding...</span>
+                              : donor.status === 'left' ? <span className="ve-left-event-chip">Left Event</span>
+                              : donor.bid ? <span className="ve-all-donor-col-val">{donor.bid}</span>
+                              : <span className="ve-donor-bidding">—</span>}
                           </div>
                         </div>
                         <span className="ve-donor-remove">⊗</span>
                       </div>
                     ))}
                   </div>
-                )) : (
-                  <div style={{ textAlign: 'center', padding: 40, color: '#9AA0A6' }}>No donors yet</div>
-                )}
+                )) : <div style={{ textAlign: 'center', padding: 40, color: '#9AA0A6' }}>No donors yet</div>}
               </div>
             </div>
           </>
@@ -785,64 +815,31 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowLiveSummary(false)} />
             <div className="ve-sheet ve-sheet--full ve-sheet--white">
               <div className="ve-sheet-topbar ve-sheet-topbar--white">
-                <div className="ve-back-btn" onClick={() => setShowLiveSummary(false)}>
-                  <img src="/assets/img/Back.svg" alt="back" />
-                </div>
+                <div className="ve-back-btn" onClick={() => setShowLiveSummary(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Live Summary</span>
                 <div style={{ width: 36 }} />
               </div>
-
               <div className="ve-ls-body">
                 <div className="ve-ls-event-pill">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M7 1.5l1.3 2.8 3.2.5-2.3 2.2.5 3.1L7 8.5l-2.7 1.6.5-3.1L2.5 4.8l3.2-.5L7 1.5z"
-                      stroke="#9AA0A6" strokeWidth="1.2" strokeLinejoin="round" />
-                  </svg>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.3 2.8 3.2.5-2.3 2.2.5 3.1L7 8.5l-2.7 1.6.5-3.1L2.5 4.8l3.2-.5L7 1.5z" stroke="#9AA0A6" strokeWidth="1.2" strokeLinejoin="round" /></svg>
                   <span className="ve-ls-event-name">{liveSummary.eventName}</span>
                 </div>
-
                 <div className="ve-ls-amount">{liveSummary.raised}</div>
                 <div className="ve-ls-org">raised for {liveSummary.org}</div>
-
                 <div className="ve-ls-meta">
-                  <span className="ve-ls-meta-item">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M9.5 12v-1A2.5 2.5 0 007 8.5H4A2.5 2.5 0 001.5 11v1" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
-                      <circle cx="5.5" cy="4.5" r="2" stroke="#9AA0A6" strokeWidth="1.3" />
-                      <path d="M12 12v-1a2.5 2.5 0 00-1.5-2.3M9.5 2.7a2 2 0 010 3.6" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
-                    </svg>
-                    {liveSummary.donors} donors
-                  </span>
-                  <span className="ve-ls-meta-item">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M9.5 12v-1A2.5 2.5 0 007 8.5H4A2.5 2.5 0 001.5 11v1" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
-                      <circle cx="5.5" cy="4.5" r="2" stroke="#9AA0A6" strokeWidth="1.3" />
-                      <path d="M12 12v-1a2.5 2.5 0 00-1.5-2.3M9.5 2.7a2 2 0 010 3.6" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
-                    </svg>
-                    {liveSummary.groups} groups
-                  </span>
+                  <span className="ve-ls-meta-item"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 12v-1A2.5 2.5 0 007 8.5H4A2.5 2.5 0 001.5 11v1" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" /><circle cx="5.5" cy="4.5" r="2" stroke="#9AA0A6" strokeWidth="1.3" /><path d="M12 12v-1a2.5 2.5 0 00-1.5-2.3M9.5 2.7a2 2 0 010 3.6" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" /></svg>{liveSummary.donors} donors</span>
+                  <span className="ve-ls-meta-item"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 12v-1A2.5 2.5 0 007 8.5H4A2.5 2.5 0 001.5 11v1" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" /><circle cx="5.5" cy="4.5" r="2" stroke="#9AA0A6" strokeWidth="1.3" /><path d="M12 12v-1a2.5 2.5 0 00-1.5-2.3M9.5 2.7a2 2 0 010 3.6" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" /></svg>{liveSummary.groups} groups</span>
                 </div>
-
                 <div className="ve-ls-section-title">Milestones</div>
                 <div className="ve-ls-milestones">
                   {liveSummary.milestones.map((m, i) => (
                     <div key={i} className={`ve-ls-milestone${m.reached ? ' ve-ls-milestone--reached' : ''}`}>
-                      <div className={`ve-ls-milestone-icon${m.reached ? ' reached' : ''}`}>
-                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                          <path d="M9 2l1.8 3.5 4 .6-2.9 2.8.7 4L9 11.2l-3.6 1.7.7-4L3.2 6.1l4-.6L9 2z"
-                            fill={m.reached ? '#fff' : 'none'}
-                            stroke={m.reached ? '#fff' : '#C5C8CC'}
-                            strokeWidth="1.3" strokeLinejoin="round" />
-                        </svg>
-                      </div>
-                      <span className={`ve-ls-milestone-text${m.reached ? ' reached' : ''}`}>
-                        {m.amount} — {m.label}
-                      </span>
+                      <div className={`ve-ls-milestone-icon${m.reached ? ' reached' : ''}`}><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2l1.8 3.5 4 .6-2.9 2.8.7 4L9 11.2l-3.6 1.7.7-4L3.2 6.1l4-.6L9 2z" fill={m.reached ? '#fff' : 'none'} stroke={m.reached ? '#fff' : '#C5C8CC'} strokeWidth="1.3" strokeLinejoin="round" /></svg></div>
+                      <span className={`ve-ls-milestone-text${m.reached ? ' reached' : ''}`}>{m.amount} — {m.label}</span>
                       {m.reached && <span className="ve-ls-reached-badge">Reached!</span>}
                     </div>
                   ))}
                 </div>
-
                 <div className="ve-ls-section-title">Group Leaderboard</div>
                 <div className="ve-ls-leaderboard">
                   {liveSummary.leaderboard.map((row, i) => (
@@ -869,100 +866,47 @@ const ViewEvent: React.FC = () => {
             <div className="ve-sheet ve-ro-sheet">
               <div className="ve-sheet-handle" />
               <div className="ve-ro-header">
-                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                  <circle cx="11" cy="11" r="9.5" stroke="#2BA7A0" strokeWidth="1.6" />
-                  <circle cx="11" cy="11" r="5" stroke="#2BA7A0" strokeWidth="1.6" />
-                  <circle cx="11" cy="11" r="1.5" fill="#2BA7A0" />
-                </svg>
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="9.5" stroke="#2BA7A0" strokeWidth="1.6" /><circle cx="11" cy="11" r="5" stroke="#2BA7A0" strokeWidth="1.6" /><circle cx="11" cy="11" r="1.5" fill="#2BA7A0" /></svg>
                 <span className="ve-ro-title">Round Overview</span>
               </div>
-
               <div className="ve-ro-tab-bars">
-                {rounds.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`ve-ro-tab-bar ${activeRoundTab === i ? 'active' : ''}`}
-                    onClick={() => setActiveRoundTab(i)}
-                  />
-                ))}
+                {rounds.map((r, i) => <div key={i} className={`ve-ro-tab-bar ${activeRoundTab === i ? 'active' : ''}`} onClick={() => setActiveRoundTab(i)} />)}
               </div>
               <div className="ve-ro-tab-labels">
-                {rounds.map((r, i) => (
-                  <button
-                    key={i}
-                    className={`ve-ro-tab-label ${activeRoundTab === i ? 'active' : ''}`}
-                    onClick={() => setActiveRoundTab(i)}
-                  >
-                    {r.label}
-                  </button>
-                ))}
+                {rounds.map((r, i) => <button key={i} className={`ve-ro-tab-label ${activeRoundTab === i ? 'active' : ''}`} onClick={() => setActiveRoundTab(i)}>{r.label}</button>)}
               </div>
-
               {activeRound && (
                 <div className="ve-ro-card">
                   <div className="ve-ro-card-header">
                     <span className="ve-ro-card-title">Round {activeRoundTab + 1}</span>
                     <span className={`ve-ro-badge ve-ro-badge--${activeRound.status}`}>
-                      {activeRound.status === 'complete'    ? 'Complete'        : ''}
-                      {activeRound.status === 'bidding'     ? 'Bidding'         : ''}
-                      {activeRound.status === 'not-started' ? 'Not yet started' : ''}
+                      {activeRound.status === 'complete' ? 'Complete' : activeRound.status === 'bidding' ? 'Bidding' : 'Not yet started'}
                     </span>
                   </div>
-
                   <div className="ve-ro-divider" />
-
                   <div className="ve-ro-stats">
-                    <div className="ve-ro-stat">
-                      <span className="ve-ro-stat-label">Raised</span>
-                      <span className="ve-ro-stat-val">{activeRound.raised ?? '--'}</span>
-                    </div>
-                    <div className="ve-ro-stat">
-                      <span className="ve-ro-stat-label">Alerts</span>
-                      <span className={`ve-ro-stat-val${activeRound.alerts ? ' ve-ro-stat-val--alert' : ''}`}>
-                        {activeRound.alerts ?? '--'}
-                      </span>
-                    </div>
-                    <div className="ve-ro-stat">
-                      <span className="ve-ro-stat-label">Groups</span>
-                      <span className="ve-ro-stat-val">{activeRound.groups}</span>
-                    </div>
+                    <div className="ve-ro-stat"><span className="ve-ro-stat-label">Raised</span><span className="ve-ro-stat-val">{activeRound.raised ?? '--'}</span></div>
+                    <div className="ve-ro-stat"><span className="ve-ro-stat-label">Alerts</span><span className={`ve-ro-stat-val${activeRound.alerts ? ' ve-ro-stat-val--alert' : ''}`}>{activeRound.alerts ?? '--'}</span></div>
+                    <div className="ve-ro-stat"><span className="ve-ro-stat-label">Groups</span><span className="ve-ro-stat-val">{activeRound.groups}</span></div>
                   </div>
-
                   <div className="ve-ro-divider" />
-
                   <div className="ve-ro-group-list">
                     {activeRound.groupRows.map((g, i) => (
                       <div key={i} className="ve-ro-group-row">
-                        <div className="ve-ro-group-left">
-                          <RowStatusIcon status={g.status} />
-                          <span className="ve-ro-group-name">{g.name}</span>
-                          {g.alert && (
-                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                              <path d="M7 1.5L13 12.5H1L7 1.5Z" fill="#F4A43A" />
-                              <path d="M7 6v3" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" />
-                              <circle cx="7" cy="10.5" r="0.6" fill="#fff" />
-                            </svg>
-                          )}
-                        </div>
-                        <span className="ve-ro-group-detail" style={{ color: g.detailColor ?? '#C5C8CC' }}>
-                          {g.detail ?? '–'}
-                        </span>
+                        <div className="ve-ro-group-left"><RowStatusIcon status={g.status} /><span className="ve-ro-group-name">{g.name}</span></div>
+                        <span className="ve-ro-group-detail" style={{ color: g.detailColor ?? '#C5C8CC' }}>{g.detail ?? '–'}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-
-              {rounds.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 40, color: '#9AA0A6' }}>No rounds started yet</div>
-              )}
-
+              {rounds.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#9AA0A6' }}>No rounds started yet</div>}
               <div className="ve-sheet-close" onClick={() => setShowRoundOverview(false)}>Close</div>
             </div>
           </>
         )}
 
-        {/* ══ Group Detail Bottom Sheet ══ */}
+        {/* ══ Group Detail Sheet ══ */}
         {selectedGroup && (
           <>
             <div className="ve-backdrop" onClick={() => setSelectedGroup(null)} />
@@ -970,30 +914,157 @@ const ViewEvent: React.FC = () => {
               <div className="ve-sheet-handle" />
               <div className="ve-sheet-header">
                 <h3 className="ve-sheet-title">{selectedGroup.name}</h3>
-                <span className={`ve-sheet-badge ${getGroupBadge(selectedGroup).cls}`}>
-                  {getGroupBadge(selectedGroup).label}
-                </span>
+                <span className={`ve-sheet-badge ${getGroupBadge(selectedGroup).cls}`}>{getGroupBadge(selectedGroup).label}</span>
               </div>
               <div className="ve-donor-list">
                 {selectedGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row">
                     <div className="ve-donor-avatar" style={{ background: donor.color }}>{donor.initial}</div>
-                    <div className="ve-donor-info">
-                      <span className="ve-donor-name">{donor.name}</span>
-                      <span className="ve-donor-sub">{donor.sub}</span>
-                    </div>
-                    <div className="ve-donor-right">
-                      {donor.bid
-                        ? <span className="ve-donor-bid">{donor.bid}</span>
-                        : <span className="ve-donor-bidding">Bidding...</span>
-                      }
-                    </div>
+                    <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span><span className="ve-donor-sub">{donor.sub}</span></div>
+                    <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
                     <span className="ve-donor-remove">⊗</span>
                   </div>
                 ))}
               </div>
               <div className="ve-sheet-close" onClick={() => setSelectedGroup(null)}>Close</div>
             </div>
+          </>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════════
+            PROPOSED GROUP ALLOCATIONS SHEET
+            Shows after round closes. Host reviews groups, selects members
+            and moves them between groups, then launches the next round.
+        ══════════════════════════════════════════════════════════════════════ */}
+        {showPGA && (
+          <>
+            <div className="ve-backdrop" onClick={() => setShowPGA(false)} />
+            <div className="ve-sheet ve-sheet--full ve-pga-sheet">
+
+              {/* Top bar */}
+              <div className="ve-sheet-topbar">
+                <div className="ve-back-btn" onClick={() => setShowPGA(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
+                <span className="ve-sheet-topbar-title">Proposed Group Allocations</span>
+                <div style={{ width: 36 }} />
+              </div>
+
+              {/* Summary bar */}
+              <div className="ve-pga-summary-bar">
+                <span className="ve-pga-total">Total: {pgaTotalPeople} people</span>
+                <button className="ve-pga-rebalance-btn" onClick={pgaRebalance}>Rebalance</button>
+              </div>
+
+              {/* Scrollable group list */}
+              <div className="ve-pga-group-list">
+                {pgaGroups.map(group => {
+                  const selectedCount = group.members.filter(m => m.selected).length;
+                  return (
+                    <div key={group.id} className="ve-pga-group-card">
+                      {/* Group header */}
+                      <div className="ve-pga-group-header">
+                        <div className="ve-pga-group-left">
+                          <span className="ve-pga-group-icon">👥</span>
+                          <span className="ve-pga-group-label">{group.label}</span>
+                          <span className="ve-pga-group-count">{group.members.length}</span>
+                        </div>
+                        <div className="ve-pga-group-actions">
+                          <button className="ve-pga-icon-btn" onClick={() => pgaToggleExpand(group.id)}>
+                            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" className={`ve-pga-chevron ${group.expanded ? 've-pga-chevron--up' : ''}`}>
+                              <polyline points="4,7 9,12 14,7" stroke="#1A1A2E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded: member grid + Move button */}
+                      {group.expanded && (
+                        <div className="ve-pga-group-body">
+                          <div className="ve-pga-member-grid">
+                            {group.members.map(member => (
+                              <button
+                                key={member.id}
+                                className={`ve-pga-member-cell ${member.selected ? 've-pga-member-cell--selected' : ''}`}
+                                onClick={() => pgaToggleMember(group.id, member.id)}
+                              >
+                                <div className="ve-pga-avatar-wrap">
+                                  <span className="ve-pga-avatar">{member.emoji}</span>
+                                  {member.selected && (
+                                    <span className="ve-pga-check">
+                                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                        <circle cx="7" cy="7" r="7" fill="#2BA7A0"/>
+                                        <polyline points="3.5,7 5.5,9.5 10.5,4.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                      </svg>
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="ve-pga-member-name">{member.name}</span>
+                                <span className="ve-pga-member-amount">{member.amount}</span>
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            className="ve-pga-move-btn"
+                            onClick={() => pgaOpenMoveSheet(group.id)}
+                            disabled={selectedCount === 0 || pgaMoveLoading}
+                          >
+                            {selectedCount > 0 ? `Move (${selectedCount})` : 'Move'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div style={{ height: 110 }} />
+              </div>
+
+              {/* Sticky footer */}
+              <div className="ve-pga-footer">
+                <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={pgaLaunchNextRound}>
+                  {actionLoading ? 'Launching…' : `Launch Round ${rounds.length + 1} →`}
+                </div>
+                <div className="ve-end-btn" onClick={() => setShowPGA(false)}>End Event</div>
+              </div>
+            </div>
+
+            {/* ── Move destination sheet ── */}
+            {moveSheet.open && (
+              <div className="ve-pga-move-backdrop">
+                <div className="ve-pga-move-sheet" ref={moveSheetRef}>
+                  <div className="ve-sheet-handle" />
+                  <h3 className="ve-pga-move-title">Select where to move the users</h3>
+
+                  {/* Selected member emoji previews */}
+                  {fromGroupForSheet && (
+                    <div className="ve-pga-move-avatars">
+                      {fromGroupForSheet.members.filter(m => m.selected).slice(0, 4).map(m => (
+                        <span key={m.id} className="ve-pga-move-avatar">{m.emoji}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Destination group rows */}
+                  <div className="ve-pga-move-group-list">
+                    {pgaGroups.map(g => {
+                      const isCurrent = g.id === moveSheet.fromGroupId;
+                      return (
+                        <button
+                          key={g.id}
+                          className={`ve-pga-move-group-row ${isCurrent ? 've-pga-move-group-row--current' : ''}`}
+                          onClick={() => !isCurrent && pgaMoveMembers(g.id)}
+                          disabled={isCurrent || pgaMoveLoading}
+                        >
+                          <span className="ve-pga-move-group-name">{g.label}</span>
+                          <span className="ve-pga-move-group-count">{g.members.length}</span>
+                          {isCurrent && <span className="ve-pga-move-current-badge">Current</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {pgaToast && <div className="ve-pga-toast">{pgaToast}</div>}
           </>
         )}
 

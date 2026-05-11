@@ -7,24 +7,26 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import './EventList.css';
 import HostHeader from '../../components/HostHeader';
-import { getEvents, logoUrl } from '../../services/events';
-import type { Event } from '../../services/events';
+import { getEvents, unlistEvent, logoUrl } from '../../services/events';
+import type { Event, HostEventTab } from '../../services/events';
 
 const EventList: React.FC = () => {
   const router = useIonRouter();
 
-  const [activeTab, setActiveTab]   = useState('upcoming');
+  const [activeTab, setActiveTab]   = useState<HostEventTab>('upcoming');
   const [openMenu, setOpenMenu]     = useState<number | null>(null);
   const [events, setEvents]         = useState<Event[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
-const location = useLocation();
+  const location = useLocation();
 
-  // ─── Fetch events ─────────────────────────────────────────────────────────
+  // ─── Fetch events whenever tab changes ────────────────────────────────────
   useEffect(() => {
     const fetchEvents = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const data = await getEvents();
+        const data = await getEvents(activeTab);
         setEvents(data);
       } catch (err) {
         setError('Failed to load events.');
@@ -33,15 +35,20 @@ const location = useLocation();
       }
     };
     fetchEvents();
-  }, [location.search]);
+  }, [activeTab, location.search]);
 
-  // ─── Filter by tab ────────────────────────────────────────────────────────
-  const filteredEvents = events.filter((e) => {
-    if (activeTab === 'upcoming')  return e.status === 'draft' || e.status === 'live';
-    if (activeTab === 'finished')  return e.status === 'finished';
-    if (activeTab === 'unlisted')  return false; // future feature
-    return false;
-  });
+  // ─── Unlist handler ───────────────────────────────────────────────────────
+  const handleUnlist = async (e: React.MouseEvent, eventId: number) => {
+    e.stopPropagation();
+    setOpenMenu(null);
+    try {
+      await unlistEvent(eventId);
+      // Remove from current list immediately, then re-fetch
+      setEvents((prev) => prev.filter((ev) => ev.id !== eventId));
+    } catch {
+      alert('Failed to unlist event. Please try again.');
+    }
+  };
 
   // ─── Card background by index ─────────────────────────────────────────────
   const bgColors = ['teal', 'orange', 'light'];
@@ -130,12 +137,12 @@ const location = useLocation();
           )}
 
           {/* Empty */}
-          {!loading && !error && filteredEvents.length === 0 && (
+          {!loading && !error && events.length === 0 && (
             <div className="empty">No Events</div>
           )}
 
           {/* Cards */}
-          {!loading && !error && filteredEvents.map((event, index) => (
+          {!loading && !error && events.map((event, index) => (
             <div
               className="ecard"
               key={event.id}
@@ -168,7 +175,14 @@ const location = useLocation();
 
                   {openMenu === index && (
                     <div className="dropdown" onClick={(e) => e.stopPropagation()}>
-                      <div className="dropdown-item">Unlist</div>
+                      {event.status !== 'unlisted' && (
+                        <div
+                          className="dropdown-item"
+                          onClick={(e) => handleUnlist(e, event.id)}
+                        >
+                          Unlist
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -212,6 +226,10 @@ const location = useLocation();
                   <div className="badge scheduled">
                     Finished on· {formatStartedAt(event.started_at)}
                   </div>
+                )}
+
+                {event.status === 'unlisted' && (
+                  <div className="badge scheduled">Unlisted</div>
                 )}
 
               </div>

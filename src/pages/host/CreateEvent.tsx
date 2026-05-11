@@ -4,29 +4,32 @@ import {
   IonModal,
   IonDatetime
 } from '@ionic/react';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useIonRouter } from '@ionic/react';
 import './CreateEvent.css';
 import HostHeader from '../../components/HostHeader';
 import { createEvent } from '../../services/events';
 import type { ApiError } from '../../services/api';
 
+
 const CreateEvent: React.FC = () => {
 
   const router = useIonRouter();
 
   // ─── Logo (avatar) ────────────────────────────────────────────────────────
-  const [logoFile, setLogoFile]       = useState<File | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [imageFiles, setImageFiles]   = useState<File[]>([]);
+  const [logoFile, setLogoFile]           = useState<File | null>(null);
+  const [logoPreview, setLogoPreview]     = useState<string | null>(null);
+  const [imageFiles, setImageFiles]       = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
-  // ─── Date / time picker ───────────────────────────────────────────────────
-  const [showDate, setShowDate] = useState(false);
-  const [showTime, setShowTime] = useState(false);
-  const [date, setDate]         = useState('');  // DD-MM-YYYY display
-  const [time, setTime]         = useState('');  // HH:MM display
-  const [rawDate, setRawDate]   = useState('');  // YYYY-MM-DD for backend
-  const [rawTime, setRawTime]   = useState('');  // HH:MM for backend
+  // ─── Date / time / duration ───────────────────────────────────────────────
+  const [showDate, setShowDate]     = useState(false);
+  const [showTime, setShowTime]     = useState(false);
+  const [date, setDate]             = useState('');   // DD-MM-YYYY display
+  const [time, setTime]             = useState('');   // HH:MM display
+  const [rawDate, setRawDate]       = useState('');   // YYYY-MM-DD for backend
+  const [rawTime, setRawTime]       = useState('');   // HH:MM for backend
+  const [durationMins, setDurationMins] = useState(5); // minutes, min 5
 
   // ─── Form fields ──────────────────────────────────────────────────────────
   const [name, setName]                 = useState('');
@@ -42,6 +45,16 @@ const CreateEvent: React.FC = () => {
   const [error, setError]             = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  // ─── Create button active when required fields are filled ─────────────────
+  const isReady = useMemo(() =>
+    name.trim() !== '' &&
+    charityName.trim() !== '' &&
+    targetAmount !== '' &&
+    !isNaN(Number(targetAmount)) &&
+    Number(targetAmount) >= 1,
+    [name, charityName, targetAmount]
+  );
+
   // ─── Handlers ─────────────────────────────────────────────────────────────
   const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -53,13 +66,26 @@ const CreateEvent: React.FC = () => {
 
   const handleImages = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    if (files.length > 10) {
+    const combined = [...imageFiles, ...files];
+    if (combined.length > 10) {
       setFieldErrors(prev => ({ ...prev, images: 'Maximum 10 images allowed' }));
       return;
     }
-    setImageFiles(files);
+    const previews = files.map(f => URL.createObjectURL(f));
+    setImageFiles(combined);
+    setImagePreviews(prev => [...prev, ...previews]);
     setFieldErrors(prev => ({ ...prev, images: '' }));
+    e.target.value = '';
   };
+
+  const removeImage = (index: number) => {
+    setImageFiles(prev => prev.filter((_, i) => i !== index));
+    setImagePreviews(prev => {
+      URL.revokeObjectURL(prev[index]);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
 
   // ─── Validation ───────────────────────────────────────────────────────────
   function validate(): boolean {
@@ -77,9 +103,6 @@ const CreateEvent: React.FC = () => {
     setError(null);
     if (!validate()) return;
 
-    // Combine date + time into started_at timestamp
-    // Both rawDate (YYYY-MM-DD) and rawTime (HH:MM) are parsed directly
-    // from ISO strings — no timezone shift
     const startedAt = rawDate && rawTime
       ? `${rawDate} ${rawTime}:00`
       : rawDate
@@ -96,6 +119,11 @@ const CreateEvent: React.FC = () => {
         rounds_count:  roundsCount,
         group_size:    groupSize,
         started_at:    startedAt,
+        duration:      (() => {
+          const h = String(Math.floor(durationMins / 60)).padStart(2, '0');
+          const m = String(durationMins % 60).padStart(2, '0');
+          return `${h}:${m}`;
+        })(),
         charity_link:  charityLink || undefined,
         logo:          logoFile,
         images:        imageFiles.length ? imageFiles : undefined,
@@ -189,7 +217,8 @@ const CreateEvent: React.FC = () => {
               marginTop: '6px',
               fontFamily: 'inherit',
               fontSize: '14px',
-              resize: 'none'
+              resize: 'none',
+              boxSizing: 'border-box',
             }}
           />
 
@@ -207,65 +236,111 @@ const CreateEvent: React.FC = () => {
 
           {/* Date & Time */}
           <div className="row">
-
-            {/* DATE */}
             <div className="col">
               <label>Start Date</label>
               <div className="fake-input" onClick={() => setShowDate(true)}>
-                {date || 'DD-MM-YYYY'}
+                <span style={{ color: date ? '#25201D' : '#ccc' }}>{date || 'DD-MM-YYYY'}</span>
                 <img src="/assets/img/calendar.svg" alt="" />
               </div>
             </div>
-
-            {/* TIME */}
             <div className="col">
               <label>Start Time</label>
               <div className="fake-input" onClick={() => setShowTime(true)}>
-                {time || 'HH:MM'}
+                <span style={{ color: time ? '#25201D' : '#ccc' }}>{time || 'HH:MM'}</span>
                 <img src="/assets/img/clock.svg" alt="" />
               </div>
             </div>
-
           </div>
 
-          {/* Rounds */}
-          <label>Round</label>
+          {/* Duration — stepper in 5-min increments */}
+          <label>Duration</label>
           <div className="round-box">
-            <button onClick={() => setRoundsCount(prev => Math.max(1, prev - 1))} disabled={loading}>
+            <button
+              onClick={() => setDurationMins(prev => Math.max(5, prev - 5))}
+              disabled={loading || durationMins <= 5}
+            >
               <img src="/assets/img/minus.svg" alt="-" />
             </button>
-            <span>{roundsCount}</span>
-            <button className="plus" onClick={() => setRoundsCount(prev => Math.min(10, prev + 1))} disabled={loading}>
+            <span>
+              {durationMins < 60
+                ? `${String(durationMins).padStart(2, '0')}:00`
+                : `${String(Math.floor(durationMins / 60)).padStart(2, '0')}:${String(durationMins % 60).padStart(2, '0')}`
+              }
+            </span>
+            <button
+              className="plus"
+              onClick={() => setDurationMins(prev => Math.min(2880, prev + 5))}
+              disabled={loading}
+            >
               <img src="/assets/img/plus.svg" alt="+" />
             </button>
           </div>
 
-          {/* Group Size */}
-          <label>Group Size</label>
-          <div className="round-box">
-            <button onClick={() => setGroupSize(prev => Math.max(2, prev - 1))} disabled={loading}>
-              <img src="/assets/img/minus.svg" alt="-" />
-            </button>
-            <span>{groupSize}</span>
-            <button className="plus" onClick={() => setGroupSize(prev => Math.min(10, prev + 1))} disabled={loading}>
-              <img src="/assets/img/plus.svg" alt="+" />
-            </button>
+          {/* Round & Group Size — side by side */}
+          <div className="row gap-20">
+            <div className="col">
+              <label>Round</label>
+              <div className="round-box">
+                <button onClick={() => setRoundsCount(prev => Math.max(1, prev - 1))} disabled={loading}>
+                  <img src="/assets/img/minus.svg" alt="-" />
+                </button>
+                <span>{roundsCount}</span>
+                <button className="plus" onClick={() => setRoundsCount(prev => Math.min(10, prev + 1))} disabled={loading}>
+                  <img src="/assets/img/plus.svg" alt="+" />
+                </button>
+              </div>
+            </div>
+            <div className="col">
+              <label>No. of people in group</label>
+              <div className="round-box">
+                <button onClick={() => setGroupSize(prev => Math.max(2, prev - 1))} disabled={loading}>
+                  <img src="/assets/img/minus.svg" alt="-" />
+                </button>
+                <span>{groupSize}</span>
+                <button className="plus" onClick={() => setGroupSize(prev => Math.min(25, prev + 1))} disabled={loading}>
+                  <img src="/assets/img/plus.svg" alt="+" />
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* Upload */}
+          {/* Images */}
           <label>Images</label>
-          <label className="upload-box">
-            <img src="/assets/img/upload.svg" alt="" />
-            <p>Upload {imageFiles.length > 0 ? `(${imageFiles.length} selected)` : ''}</p>
-            <small>Max 10 Images</small>
-            <input
-              type="file"
-              hidden
-              multiple
-              accept="image/*"
-              onChange={handleImages}
-            />
-          </label>
+
+          {imagePreviews.length === 0 ? (
+            /* ── Empty: original upload box ── */
+            <label className="upload-box">
+              <img src="/assets/img/upload.svg" alt="" />
+              <p>Upload</p>
+              <small>Max 10 Images</small>
+              <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
+            </label>
+          ) : (
+            /* ── Filled: thumbnail row matching Figma ── */
+            <div className="image-preview-grid">
+              {imagePreviews.map((src, i) => (
+                <div key={i} className="image-preview-thumb">
+                  <img src={src} alt={`img-${i}`} />
+                  <button
+                    className="image-preview-remove"
+                    onClick={() => removeImage(i)}
+                    type="button"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {imagePreviews.length < 10 && (
+                <label className="image-preview-add">
+                  <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M9 3v12M3 9h12" stroke="#9AA0A6" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <span>Add</span>
+                </label>
+              )}
+            </div>
+          )}
           {fieldErrors.images && <span className="field-error">{fieldErrors.images}</span>}
 
           {/* Payment */}
@@ -277,9 +352,9 @@ const CreateEvent: React.FC = () => {
             disabled={loading}
           />
 
-          {/* Buttons */}
+          {/* Create Button */}
           <button
-            className="create-btn"
+            className={`create-btn${isReady ? ' create-btn--active' : ''}`}
             onClick={handleCreate}
             disabled={loading}
           >
@@ -293,11 +368,7 @@ const CreateEvent: React.FC = () => {
         </div>
 
         {/* ── DATE MODAL ── */}
-        <IonModal
-          isOpen={showDate}
-          onDidDismiss={() => setShowDate(false)}
-          keepContentsMounted={true}
-        >
+        <IonModal isOpen={showDate} onDidDismiss={() => setShowDate(false)} keepContentsMounted={true}>
           <div className="picker-header">
             <span onClick={() => setShowDate(false)}>←</span>
             <h3>Select Date</h3>
@@ -307,31 +378,19 @@ const CreateEvent: React.FC = () => {
             onIonChange={(e) => {
               const val = e.detail.value as string;
               if (!val) return;
-
-              // Parse date directly from ISO string — no timezone shift
-              const datePart = val.split('T')[0]; // "YYYY-MM-DD"
+              const datePart = val.split('T')[0];
               const [yyyy, mm, dd] = datePart.split('-');
-
-              setRawDate(datePart);               // YYYY-MM-DD → sent to backend
-              setDate(`${dd}-${mm}-${yyyy}`);     // DD-MM-YYYY → display only
+              setRawDate(datePart);
+              setDate(`${dd}-${mm}-${yyyy}`);
             }}
           />
           <div style={{ padding: '0 16px 32px' }}>
-            <button
-              className="create-btn"
-              onClick={() => setShowDate(false)}
-            >
-              Confirm
-            </button>
+            <button className="create-btn create-btn--active" onClick={() => setShowDate(false)}>Confirm</button>
           </div>
         </IonModal>
 
         {/* ── TIME MODAL ── */}
-        <IonModal
-          isOpen={showTime}
-          onDidDismiss={() => setShowTime(false)}
-          keepContentsMounted={true}
-        >
+        <IonModal isOpen={showTime} onDidDismiss={() => setShowTime(false)} keepContentsMounted={true}>
           <div className="picker-header">
             <span onClick={() => setShowTime(false)}>←</span>
             <h3>Select Time</h3>
@@ -341,24 +400,17 @@ const CreateEvent: React.FC = () => {
             onIonChange={(e) => {
               const val = e.detail.value as string;
               if (!val) return;
-
-              // Parse HH:MM directly from ISO string — no timezone shift
               const timePart = val.includes('T') ? val.split('T')[1] : val;
               const [hh, mm] = timePart.split(':');
-
-              setRawTime(`${hh}:${mm}`);          // HH:MM → used in startedAt
-              setTime(`${hh}:${mm}`);             // HH:MM → display
+              setRawTime(`${hh}:${mm}`);
+              setTime(`${hh}:${mm}`);
             }}
           />
           <div style={{ padding: '0 16px 32px' }}>
-            <button
-              className="create-btn"
-              onClick={() => setShowTime(false)}
-            >
-              Confirm
-            </button>
+            <button className="create-btn create-btn--active" onClick={() => setShowTime(false)}>Confirm</button>
           </div>
         </IonModal>
+
 
       </IonContent>
     </IonPage>

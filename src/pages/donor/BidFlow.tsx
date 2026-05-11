@@ -70,7 +70,18 @@ interface EventDetail {
   my_pseudonym: string | null;
   my_initial: string | null;
   my_emoji: string | null;
+  duration: string | null; // "HH:MM" e.g. "00:05", "01:00"
 }
+
+/** Parse "HH:MM" duration string → total seconds */
+function parseDurationToSeconds(duration: string | null | undefined): number {
+  if (!duration) return 0;
+  const parts = duration.split(':').map(Number);
+  const hh = parts[0] || 0;
+  const mm = parts[1] || 0;
+  return (hh * 60 + mm) * 60;
+}
+
 
 interface Particle {
   x: number; y: number; w: number; h: number;
@@ -109,8 +120,10 @@ const BidFlow: React.FC = () => {
   const [groupBidsOpen, setGroupBidsOpen] = useState(false);
   const [submitting,    setSubmitting]    = useState(false);
 
-  // ✅ Elapsed timer — counts UP, seeded from API
-  const [elapsed, setElapsed] = useState(0);
+  // ── Countdown timer — counts DOWN from event duration ─────────
+  const [countdown, setCountdown] = useState(0);
+  // Keep duration in a ref so the timer effect always sees the latest value
+  const durationRef = useRef<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef    = useRef<number>(0);
@@ -123,20 +136,39 @@ const BidFlow: React.FC = () => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   };
 
-  const startTimer = useCallback((seed: number) => {
+  const startCountdown = useCallback((totalSeconds: number, elapsedSeconds: number) => {
     stopTimer();
-    setElapsed(seed);
-    timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
+    const remaining = Math.max(0, totalSeconds - elapsedSeconds);
+    setCountdown(remaining);
+    timerRef.current = setInterval(() => {
+      setCountdown(prev => Math.max(0, prev - 1));
+    }, 1000);
   }, []);
 
+  // Restart timer whenever round status changes
   useEffect(() => {
     if (round?.status === 'open') {
-      startTimer(round.seconds_left ?? 0);
+      const remaining = round.seconds_left ?? 0;
+      // Only start countdown if we have a meaningful remaining time
+      // (backend returns 0 or actual remaining when duration is set)
+      if (remaining > 0 && remaining < 86400) { // sanity: less than 24hrs
+        startCountdown(remaining, 0);
+      }
     } else {
       stopTimer();
     }
     return () => stopTimer();
-  }, [round?.id, round?.status]);
+  }, [round?.id, round?.status, round?.seconds_left]);
+
+  // When event loads after round is already open
+  useEffect(() => {
+    if (!event?.duration) return;
+    durationRef.current = event.duration;
+    if (round?.status === 'open' && countdown === 0) {
+      const remaining = round.seconds_left ?? 0;
+      if (remaining > 0 && remaining < 86400) startCountdown(remaining, 0);
+    }
+  }, [event?.duration]);
 
   // ── Polling ────────────────────────────────────────────────────
   const stopPolling = () => {
@@ -285,16 +317,23 @@ const BidFlow: React.FC = () => {
   const adjustBid = (delta: number) =>
     setBidAmount(prev => { const n = Math.max(0, prev + delta); setInputVal(String(n)); return n; });
 
-  // MM:SS elapsed counter
+  // MM:SS countdown formatter
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
+  // Timer turns orange when ≤ 60 seconds remaining (or no duration set)
+  const timerDisplay  = fmt(countdown);
+  const timerOrange   = countdown <= 60 && countdown > 0;
   const handleSubmitBid = async () => {
     if (!round || submitting) return;
     setSubmitting(true);
     try {
       await api.post(`/donor/events/${eventId}/bid`, { amount: bidAmount });
       setScreen('submitted');
+      // Brief confirmation, then navigate to the donor event detail page
+      setTimeout(() => {
+        router.push(`/join-event?id=${eventId}`, 'forward', 'replace');
+      }, 1500);
     } catch (_) {
     } finally {
       setSubmitting(false);
@@ -409,7 +448,7 @@ const BidFlow: React.FC = () => {
   if (screen === 'bid-entry') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       <div className="bf-s2">
-        <EventCard eventName={eventName} timer={fmt(elapsed)} timerOrange={false} roundLabel={roundLabel} />
+        <EventCard eventName={eventName} timer={timerDisplay} timerOrange={timerOrange} roundLabel={roundLabel} />
         <div className="bf-amount-zone">
           <p className="bf-amount-hint">Type your bid</p>
           <div className="bf-amount-display">
@@ -463,7 +502,7 @@ const BidFlow: React.FC = () => {
           </button>
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
-        <EventCard eventName={eventName} timer={fmt(elapsed)} timerOrange roundLabel={roundLabel} />
+        <EventCard eventName={eventName} timer={timerDisplay} timerOrange={timerOrange} roundLabel={roundLabel} />
         <GroupCard groupName={groupName} members={groupMembers} />
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
