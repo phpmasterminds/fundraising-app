@@ -10,13 +10,16 @@ import './QrScan.css';
 
 const QrScan: React.FC = () => {
   const router = useIonRouter();
-  
-  const { checking } = useAuthRedirect();
-  if (checking) return null;
 
+  const { checking } = useAuthRedirect();
+
+  // All hooks must come before any early return
   useEffect(() => {
+    if (checking) return;
     startScan();
-  }, []);
+  }, [checking]);
+
+  if (checking) return null;
 
   const startScan = async () => {
     try {
@@ -31,8 +34,7 @@ const QrScan: React.FC = () => {
 
       if (result.barcodes.length > 0) {
         const code = result.barcodes[0].rawValue;
-
-        router.push(`/event-about?code=${code}`, 'root');
+        router.push(`/join-event?code=${code}`, 'root');
       }
 
     } catch (err) {

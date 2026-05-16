@@ -198,13 +198,12 @@ const DEventList: React.FC = () => {
 
         </div>
 
-        {/* ── Join Event Bottom Bar ── */}
+        {/* ── Join Event Bottom Bar ── 
         <div className="join-bottom-bar">
           <button
             className="join-code-btn"
             onClick={() => setShowCodeModal(true)}
           >
-            {/* Ticket icon */}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M2 9C2 7.89543 2.89543 7 4 7H20C21.1046 7 22 7.89543 22 9V10C21.1046 10 20 10.8954 20 12C20 13.1046 21.1046 14 22 14V15C22 16.1046 21.1046 17 20 17H4C2.89543 17 2 16.1046 2 15V14C2.89543 14 3 13.1046 3 12C3 10.8954 2.89543 10 2 10V9Z" stroke="white" strokeWidth="1.8" strokeLinejoin="round"/>
             </svg>
@@ -215,7 +214,6 @@ const DEventList: React.FC = () => {
             className="join-qr-btn"
             onClick={() => router.push('/qr')}
           >
-            {/* QR icon */}
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="3" y="3" width="7" height="7" rx="1" stroke="#2BA7A0" strokeWidth="1.8"/>
               <rect x="5" y="5" width="3" height="3" fill="#2BA7A0"/>
@@ -229,7 +227,7 @@ const DEventList: React.FC = () => {
               <path d="M20 14H20.01" stroke="#2BA7A0" strokeWidth="2" strokeLinecap="round"/>
             </svg>
           </button>
-        </div>
+        </div>*/}
 
         {/* ── Code Entry Modal ── */}
         {showCodeModal && (

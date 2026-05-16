@@ -48,8 +48,6 @@ const EventView: React.FC = () => {
   const isLoggedIn = !!localStorage.getItem('auth_token');
 
   // ── Fetch event detail ────────────────────────────────────────
-  // Guest   → use getEventByCode (public route, no auth needed)
-  // Donor   → use getDonorEventDetail (authenticated, returns is_member etc.)
   useEffect(() => {
     if (!eventId) return;
 
@@ -60,14 +58,13 @@ const EventView: React.FC = () => {
         if (isLoggedIn) {
           data = await getDonorEventDetail(eventId);
         } else {
-          // Guest — use stored join code to call public endpoint
           const code = localStorage.getItem('event_code') ?? '';
           if (!code) {
             setLoading(false);
             return;
           }
           data = await getEventByCode(code);
-		  data = data.event;
+          data = data.event;
         }
 
         setEvent(data);
@@ -96,25 +93,22 @@ const EventView: React.FC = () => {
     return () => clearInterval(timer);
   }, [isActive, seconds]);
 
-	// ── Join handler ─────────────────────────────────────────────
-	const handleJoin = () => {
-		if (!event) return;
+  // ── Join handler ─────────────────────────────────────────────
+  const handleJoin = () => {
+    if (!event) return;
 
-		// Store event id for BidFlow
-		localStorage.setItem('event_id', String(event.id));
+    localStorage.setItem('event_id', String(event.id));
 
-		const code  = event.join_code ?? localStorage.getItem('event_code') ?? '';
-		const token = localStorage.getItem('auth_token');
+    const code  = event.join_code ?? localStorage.getItem('event_code') ?? '';
+    const token = localStorage.getItem('auth_token');
 
-		if (!token) {
-		  // Guest — register first
-		  router.push(`/register?from=qr&code=${code}`);
-		  return;
-		}
+    if (!token) {
+      router.push(`/register?from=qr&code=${code}`);
+      return;
+    }
 
-		// Logged in — go set pseudonym
-		router.push(`/profile?mode=join`);
-	};
+    router.push(`/profile?mode=join`);
+  };
 
   // ── Start funding (already a member) ─────────────────────────
   const handleStart = () => {
@@ -128,9 +122,9 @@ const EventView: React.FC = () => {
     ? event.images.map(p => storageUrl(p) ?? '/assets/img/Slide1.jpg')
     : ['/assets/img/Slide1.jpg', '/assets/img/Slide2.jpg', '/assets/img/Slide3.jpg'];
 
-  const logoSrc = storageUrl(event?.logo) ?? '/assets/img/Heart.svg';
-
-  const isMember = event?.is_member ?? false;
+  const logoSrc  = storageUrl(event?.logo) ?? '/assets/img/Heart.svg';
+  const isMember   = event?.is_member ?? false;
+  const isFinished = event?.status === 'finished';
 
   if (loading) {
     return (
@@ -205,23 +199,25 @@ const EventView: React.FC = () => {
 
         </div>
 
-        {/* ── BOTTOM BUTTON ── */}
-        {!isMember ? (
-          <div className="bottom-btn active" onClick={handleJoin}>
-            Join Event
-            <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
-              <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-            </svg>
-          </div>
-        ) : (
-          <div className={`bottom-btn ${isActive ? 'active' : ''}`} onClick={handleStart}>
-            Start Funding
-            <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
-              <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-            </svg>
-          </div>
+        {/* ── BOTTOM BUTTON — hidden for finished events ── */}
+        {!isFinished && (
+          !isMember ? (
+            <div className="bottom-btn active" onClick={handleJoin}>
+              Join Event
+              <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
+                <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+                <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+            </div>
+          ) : (
+            <div className={`bottom-btn ${isActive ? 'active' : ''}`} onClick={handleStart}>
+              Start Funding
+              <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
+                <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+                <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+            </div>
+          )
         )}
 
       </IonContent>

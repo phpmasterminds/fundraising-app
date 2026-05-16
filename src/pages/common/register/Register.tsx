@@ -1,8 +1,8 @@
 import { IonPage, IonContent } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { register, getRole, getPendingRole } from '../../../services/auth';
+import { register, getRole, getPendingRole, getToken, refreshUser } from '../../../services/auth';
 import type { ApiError } from '../../../services/api';
 import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './Register.css';
@@ -18,17 +18,23 @@ const Register: React.FC = () => {
   const fromQR    = params.get('from') === 'qr';
   const eventCode = params.get('code') ?? '';
 
-  // Determine role: QR always = donor, otherwise from localStorage
-  //const role: UserRole = fromQR ? 'donor' : (getRole() as UserRole) ?? 'donor';
+  // Determine role
   const role: UserRole = fromQR ? 'donor' : (getPendingRole() as UserRole) ?? 'donor';
-console.log(role+'--');
+  console.log(role + '--');
+
   // ─── Form state ───────────────────────────────────────────────────────────
   const [name, setName]                 = useState('');
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
   const [confirmPassword, setConfirmPw] = useState('');
+  const [pseudonym, setPseudonym]       = useState('');
   const [showPw, setShowPw]             = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
+
+  // ─── Avatar state ─────────────────────────────────────────────────────────
+  const [avatarFile, setAvatarFile]       = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef                      = useRef<HTMLInputElement>(null);
 
   // ─── UI state ─────────────────────────────────────────────────────────────
   const [loading, setLoading]         = useState(false);
@@ -36,6 +42,22 @@ console.log(role+'--');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   if (checking) return null;
+
+  // ─── Avatar picker ────────────────────────────────────────────────────────
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be under 5 MB.');
+      return;
+    }
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  };
 
   // ─── Validation ───────────────────────────────────────────────────────────
   function validate(): boolean {
@@ -51,15 +73,16 @@ console.log(role+'--');
 
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
-  }	 
-const handleInputChange = (e: any) => {
-  const parent = e.target.closest('.input-box');
-  if (e.target.value.trim() !== '') {
-    parent.classList.add('has-value');
-  } else {
-    parent.classList.remove('has-value');
   }
-}
+
+  const handleInputChange = (e: any) => {
+    const parent = e.target.closest('.input-box');
+    if (e.target.value.trim() !== '') {
+      parent.classList.add('has-value');
+    } else {
+      parent.classList.remove('has-value');
+    }
+  };
 
   // ─── Submit ───────────────────────────────────────────────────────────────
   const handleRegister = async () => {
@@ -74,7 +97,29 @@ const handleInputChange = (e: any) => {
         password,
         password_confirmation: confirmPassword,
         role,
+        ...(pseudonym.trim() ? { pseudonym: pseudonym.trim() } : {}),
       });
+
+      // Upload avatar if selected (token is now available in localStorage)
+      if (avatarFile) {
+        try {
+          const token = getToken();
+          const fd    = new FormData();
+          fd.append('avatar', avatarFile);
+          await fetch(
+            `${import.meta.env.VITE_API_URL}/upload-avatar`,
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: fd,
+            }
+          );
+          // Sync localStorage cache so the avatar appears immediately without re-login
+          await refreshUser();
+        } catch {
+          // Avatar upload failing is non-fatal — user can change it from profile later
+        }
+      }
 
       // If came from QR/code flow → go back to event view with code
       if (fromQR && eventCode) {
@@ -134,12 +179,29 @@ const handleInputChange = (e: any) => {
           {error && <div className="error-banner"><span>{error}</span></div>}
 
           {/* Avatar */}
-          <div className="profile">
+          <div className="profile" onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer' }}>
             <div className="avatar">
-              <img src="/assets/img/user.svg" alt="avatar" />
+              {avatarPreview ? (
+                <img
+                  src={avatarPreview}
+                  alt="avatar"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                />
+              ) : (
+                <img src="/assets/img/user.svg" alt="avatar" />
+              )}
             </div>
-            <span>Upload Photo</span>
+            <span>{avatarPreview ? 'Change Photo' : 'Upload Photo'}</span>
           </div>
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={handleAvatarChange}
+          />
 
           {/* Form */}
           <div className="form-area">
@@ -171,11 +233,32 @@ const handleInputChange = (e: any) => {
                   placeholder="john@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"	   onInput={handleInputChange}
+                  autoComplete="email"
+                  onInput={handleInputChange}
                   disabled={loading}
                 />
               </div>
               {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
+            </div>
+
+            {/* Display Name — shown to all roles; hint text adapts */}
+            <div className="input-group">
+              <label>Display Name <span className="optional">(optional)</span></label>
+              <div className="input-box">
+                <img src="/assets/img/user.svg" alt="" />
+                <input
+                  type="text"
+                  placeholder="e.g. BraveLion"
+                  value={pseudonym}
+                  onChange={(e) => setPseudonym(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+              <span className="hint">
+                {role === 'donor'
+                  ? 'This is how other donors will see you.'
+                  : 'Your public display name.'}
+              </span>
             </div>
 
             {/* Password */}
@@ -189,7 +272,8 @@ const handleInputChange = (e: any) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="new-password"
-                  disabled={loading}	 onInput={handleInputChange}
+                  disabled={loading}
+                  onInput={handleInputChange}
                 />
                 <img
                   src="/assets/img/Eye.svg"
@@ -213,7 +297,8 @@ const handleInputChange = (e: any) => {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPw(e.target.value)}
                   autoComplete="new-password"
-                  disabled={loading}   onInput={handleInputChange}
+                  disabled={loading}
+                  onInput={handleInputChange}
                 />
                 <img
                   src="/assets/img/Eye.svg"

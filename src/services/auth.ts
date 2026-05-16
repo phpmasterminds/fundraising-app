@@ -17,6 +17,7 @@ export interface AuthUser {
   email: string;
   role: UserRole;
   avatar?: string;
+  pseudonym?: string;
 }
 
 export interface LoginPayload {
@@ -30,6 +31,7 @@ export interface RegisterPayload {
   password: string;
   password_confirmation: string;
   role: UserRole;
+  pseudonym?: string;
 }
 
 export interface AuthResponse {
