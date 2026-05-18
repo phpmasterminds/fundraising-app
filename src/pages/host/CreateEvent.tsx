@@ -23,13 +23,14 @@ const CreateEvent: React.FC = () => {
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
   // ─── Date / time / duration ───────────────────────────────────────────────
-  const [showDate, setShowDate]     = useState(false);
-  const [showTime, setShowTime]     = useState(false);
-  const [date, setDate]             = useState('');   // DD-MM-YYYY display
-  const [time, setTime]             = useState('');   // HH:MM display
-  const [rawDate, setRawDate]       = useState('');   // YYYY-MM-DD for backend
-  const [rawTime, setRawTime]       = useState('');   // HH:MM for backend
-  const [durationMins, setDurationMins] = useState(5); // minutes, min 5
+  const [showDate, setShowDate]         = useState(false);
+  const [showTime, setShowTime]         = useState(false);
+  const [date, setDate]                 = useState('');   // DD-MM-YYYY display
+  const [time, setTime]                 = useState('');   // HH:MM display
+  const [rawDate, setRawDate]           = useState('');   // YYYY-MM-DD for backend
+  const [rawTime, setRawTime]           = useState('');   // HH:MM for backend
+  const [durationMins, setDurationMins] = useState(5);   // round duration, min 5 min
+  const [roundTimeMins, setRoundTimeMins] = useState(2); // wait between rounds, 0 = manual
 
   // ─── Form fields ──────────────────────────────────────────────────────────
   const [name, setName]                 = useState('');
@@ -54,6 +55,13 @@ const CreateEvent: React.FC = () => {
     Number(targetAmount) >= 1,
     [name, charityName, targetAmount]
   );
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const formatMins = (mins: number) => {
+    if (mins === 0) return 'Manual';
+    if (mins < 60) return `${String(mins).padStart(2, '0')}:00`;
+    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  };
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
   const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,7 +93,6 @@ const CreateEvent: React.FC = () => {
       return prev.filter((_, i) => i !== index);
     });
   };
-
 
   // ─── Validation ───────────────────────────────────────────────────────────
   function validate(): boolean {
@@ -119,11 +126,12 @@ const CreateEvent: React.FC = () => {
         rounds_count:  roundsCount,
         group_size:    groupSize,
         started_at:    startedAt,
-        duration:      (() => {
+        duration: (() => {
           const h = String(Math.floor(durationMins / 60)).padStart(2, '0');
           const m = String(durationMins % 60).padStart(2, '0');
           return `${h}:${m}`;
         })(),
+        round_time:    roundTimeMins * 60,  // convert minutes → seconds
         charity_link:  charityLink || undefined,
         logo:          logoFile,
         images:        imageFiles.length ? imageFiles : undefined,
@@ -252,8 +260,8 @@ const CreateEvent: React.FC = () => {
             </div>
           </div>
 
-          {/* Duration — stepper in 5-min increments */}
-          <label>Duration</label>
+          {/* Duration — how long each round lasts, stepper in 5-min increments */}
+          <label>Round Duration</label>
           <div className="round-box">
             <button
               onClick={() => setDurationMins(prev => Math.max(5, prev - 5))}
@@ -275,6 +283,32 @@ const CreateEvent: React.FC = () => {
               <img src="/assets/img/plus.svg" alt="+" />
             </button>
           </div>
+
+          {/* Wait Time Between Rounds — 0 = Manual (host launches next round) */}
+          <label>Wait Time Between Rounds</label>
+          <div className="round-box">
+            <button
+              onClick={() => setRoundTimeMins(prev => Math.max(0, prev - 1))}
+              disabled={loading || roundTimeMins <= 0}
+            >
+              <img src="/assets/img/minus.svg" alt="-" />
+            </button>
+            <span style={{ color: roundTimeMins === 0 ? '#9AA0A6' : '#25201D' }}>
+              {formatMins(roundTimeMins)}
+            </span>
+            <button
+              className="plus"
+              onClick={() => setRoundTimeMins(prev => Math.min(60, prev + 1))}
+              disabled={loading}
+            >
+              <img src="/assets/img/plus.svg" alt="+" />
+            </button>
+          </div>
+          <small style={{ color: '#9AA0A6', fontSize: 12, marginTop: 4, display: 'block' }}>
+            {roundTimeMins === 0
+              ? 'You will launch each round manually.'
+              : `Next round auto-starts ${roundTimeMins} min after the previous round ends.`}
+          </small>
 
           {/* Round & Group Size — side by side */}
           <div className="row gap-20">
@@ -316,7 +350,7 @@ const CreateEvent: React.FC = () => {
               <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
             </label>
           ) : (
-            /* ── Filled: thumbnail row matching Figma ── */
+            /* ── Filled: thumbnail row ── */
             <div className="image-preview-grid">
               {imagePreviews.map((src, i) => (
                 <div key={i} className="image-preview-thumb">
@@ -410,7 +444,6 @@ const CreateEvent: React.FC = () => {
             <button className="create-btn create-btn--active" onClick={() => setShowTime(false)}>Confirm</button>
           </div>
         </IonModal>
-
 
       </IonContent>
     </IonPage>

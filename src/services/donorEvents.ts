@@ -119,8 +119,16 @@ export async function getCurrentRound(eventId: number): Promise<RoundState> {
   return data;
 }
 
-/** POST /donor/events/:id/bid — submit or update bid for open round */
-export async function submitBid(eventId: number, amount: number): Promise<{ success: boolean; bid_id: number; round_id: number; amount: number }> {
+/** POST /donor/events/:id/bid — submit bid for currently open round */
+export async function submitBid(eventId: number, amount: number): Promise<{
+  success: boolean;
+  bid_id: number;
+  round_id: number;
+  round_number: number;
+  amount: number;
+  bid_status: 'active';
+  message: string;
+}> {
   const { data } = await api.post(`/donor/events/${eventId}/bid`, { amount });
   return data;
 }
@@ -160,5 +168,40 @@ export async function getPaymentSummary(eventId: number): Promise<PaymentSummary
 /** POST /donor/events/:id/payment/mark-paid */
 export async function markPaidOffline(eventId: number): Promise<{ success: boolean }> {
   const { data } = await api.post(`/donor/events/${eventId}/payment/mark-paid`);
+  return data;
+}
+
+/** GET /donor/events/:id/round-status — lightweight polling between rounds */
+export interface RoundStatus {
+  event_status:       string;
+  current_round:      number;
+  round_status:       'open' | 'waiting' | 'finished';
+  seconds_left:       number | null;
+  seconds_until_next: number | null;
+}
+
+export async function getRoundStatus(eventId: number): Promise<RoundStatus> {
+  const { data } = await api.get<RoundStatus>(`/donor/events/${eventId}/round-status`);
+  return data;
+}
+
+/** POST /donor/events/:id/rounds/advance
+ *
+ * Called when donor's waiting timer hits 0, or donor clicks "Continue to Round N".
+ * Backend will:
+ *   - Close current round if duration expired
+ *   - Open next round if round_time has elapsed (or is 0 = manual)
+ *   - Release pending bids for new round
+ */
+export interface AdvanceRoundResult {
+  advanced:          boolean;
+  event_status:      string;
+  round_number?:     number;
+  seconds_remaining?: number;
+  message:           string;
+}
+
+export async function advanceRound(eventId: number): Promise<AdvanceRoundResult> {
+  const { data } = await api.post<AdvanceRoundResult>(`/donor/events/${eventId}/rounds/advance`);
   return data;
 }

@@ -13,6 +13,7 @@ export interface CreateEventPayload {
   group_size:    number;
   started_at?:   string;   // YYYY-MM-DD HH:MM:00
   duration?:     string;   // HH:MM
+  round_time?:   number;   // seconds — waiting period between rounds (0 = manual)
   charity_link?: string;
   logo?:         File | null;
   images?:       File[];
@@ -36,6 +37,8 @@ export interface Event {
   total_raised?:         number;
   donors_count?:         number;
   is_member?:            boolean;
+  duration?:             string;
+  round_time?:           number;   // seconds — waiting period between rounds
   // Round state
   current_round_number?: number;
   completed_rounds?:     number;
@@ -132,6 +135,11 @@ export async function createEvent(payload: CreateEventPayload): Promise<Event> {
   if (payload.charity_link) form.append('charity_link', payload.charity_link);
   if (payload.logo)         form.append('logo',         payload.logo);
 
+  // Always send round_time — even 0 is a valid value (means host launches manually)
+  if (payload.round_time !== undefined) {
+    form.append('round_time', String(payload.round_time));
+  }
+
   if (payload.images?.length) {
     payload.images.forEach((img) => form.append('images[]', img));
   }
@@ -144,9 +152,10 @@ export async function createEvent(payload: CreateEventPayload): Promise<Event> {
 }
 
 export async function updateEvent(id: number, data: {
-  name?: string;
-  charity_name?: string;
+  name?:          string;
+  charity_name?:  string;
   target_amount?: number;
+  round_time?:    number;   // seconds — can be updated after creation
 }): Promise<Event> {
   const { data: result } = await api.put<Event>(`/host/events/${id}`, data, {
     headers: { 'Content-Type': 'application/json' },

@@ -113,7 +113,18 @@ const EventView: React.FC = () => {
   // ── Start funding (already a member) ─────────────────────────
   const handleStart = () => {
     if (event?.is_member && isActive) {
-      router.push(`/bid?id=${eventId}`);
+      router.push(
+        `/bid?id=${eventId}`,
+        'forward',
+        'push',
+        {
+          eventId:     event.id,
+          totalRounds: event.rounds_count,
+          roundTime:   (event as any).round_time ?? 0,
+          eventName:   event.name,
+          myPseudonym: event.my_pseudonym ?? 'You',
+        }
+      );
     }
   };
 
