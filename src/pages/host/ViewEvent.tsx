@@ -107,6 +107,7 @@ const ViewEvent: React.FC = () => {
   const [apiEvent, setApiEvent]   = useState<Event | null>(null);
   const [timerSecs, setTimerSecs] = useState(0);
   const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef                   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── Proposed Group Allocations (PGA) state ───────────────────────────────
   const [showPGA, setShowPGA]           = useState(false);
@@ -151,6 +152,18 @@ const ViewEvent: React.FC = () => {
     timerRef.current = setInterval(() => setTimerSecs(s => s + 1), 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [apiEvent?.status]);
+
+  // ─── Auto-refresh polling (live events only) ──────────────────────────────
+  // Polls every 5 s so donors, bids, and group changes appear without a manual refresh.
+  useEffect(() => {
+    if (apiEvent?.status !== 'live') {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+    pollRef.current = setInterval(() => { refreshEvent(); }, 5000);
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEvent?.status, eventId]);
 
   const formatTimer = (secs: number) => {
     const m = String(Math.floor(secs / 60)).padStart(2, '0');

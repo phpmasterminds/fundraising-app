@@ -62,13 +62,26 @@ const BidFlow: React.FC = () => {
   const [inputVal,      setInputVal]     = useState('0');
   const [submitting,    setSubmitting]   = useState(false);
   const [submitError,   setSubmitError]  = useState('');
+
+  // Persist last bid across rounds — keyed by eventId so it's per-event
+  const lsKey = `peerfund_lastbid_${stateEventId}`;
+  const [lastBidAmount, setLastBidAmountState] = useState<number>(() => {
+    const saved = localStorage.getItem(lsKey);
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const setLastBidAmount = (n: number) => {
+    localStorage.setItem(lsKey, String(n));
+    setLastBidAmountState(n);
+  };
+
   const [currentRound,  setCurrentRound] = useState(1);
   const [roundData,     setRoundData]    = useState<RoundState | null>(null);
   const [groupBidsOpen, setGroupBidsOpen]= useState(false);
 
   // Server-seeded timers
-  const [roundSecsLeft,   setRoundSecsLeft]   = useState<number | null>(null);
-  const [waitingSecsLeft, setWaitingSecsLeft] = useState<number | null>(null);
+  const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
+  const [waitingSecsLeft,    setWaitingSecsLeft]    = useState<number | null>(null);
+  const [roundCloseSecsLeft, setRoundCloseSecsLeft] = useState<number | null>(null); // countdown on round-results
 
   const [paymentData,  setPaymentData]  = useState<PaymentSummary | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -85,6 +98,13 @@ const BidFlow: React.FC = () => {
   // 1. Fetch event meta on mount + check if event already finished
   useEffect(() => {
     if (!stateEventId) return;
+
+    // Pre-fill bid with last saved amount if available
+    const saved = localStorage.getItem(`peerfund_lastbid_${stateEventId}`);
+    if (saved) {
+      const n = parseInt(saved, 10);
+      if (n > 0) { setBidAmount(n); setInputVal(String(n)); }
+    }
 
     // Always check round status first to handle finished events immediately
     getRoundStatus(stateEventId).then(res => {
@@ -173,6 +193,7 @@ const BidFlow: React.FC = () => {
         const d = await getCurrentRound(eventId);
         setRoundData(d);
         setCurrentRound(prev => Math.max(prev, d.round_number, roundWhenSubmitted));
+        if (d.seconds_left !== null && d.seconds_left > 0) setRoundCloseSecsLeft(d.seconds_left);
         setGroupBidsOpen(false);
         setScreen('round-results');
       } catch (_) {
@@ -182,6 +203,19 @@ const BidFlow: React.FC = () => {
     }, 2000);
     return () => clearTimeout(t);
   }, [screen]);
+
+  // 5a. round-results: tick down round close timer
+  useEffect(() => {
+    if (screen !== 'round-results') return;
+    if (!roundCloseSecsLeft || roundCloseSecsLeft <= 0) return;
+    const t = setInterval(() => {
+      setRoundCloseSecsLeft(s => {
+        if (!s || s <= 1) { clearInterval(t); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [screen, !!roundCloseSecsLeft && roundCloseSecsLeft > 0]);
 
   // 6. round-results: poll every 3s for next round, waiting, or finished
   useEffect(() => {
@@ -203,6 +237,16 @@ const BidFlow: React.FC = () => {
         // Keep polling until event_status = finished
         if (currentRound >= totalRounds) return;
 
+        // Always re-fetch round data so matched_amount / group_total update live
+        try {
+          const d = await getCurrentRound(eventId);
+          setRoundData(d);
+          // Keep round-close timer in sync with server
+          if (d.seconds_left !== null && d.seconds_left > 0 && roundCloseSecsLeft === null) {
+            setRoundCloseSecsLeft(d.seconds_left);
+          }
+        } catch (_) {}
+
         // Next round opened (not last round)
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
@@ -215,25 +259,27 @@ const BidFlow: React.FC = () => {
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
-          setBidAmount(0); setInputVal('0');
+          // Pre-fill last bid amount as minimum for next round
+          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('bid-entry');
           return;
         }
 
-        // Between rounds — go to waiting screen
+        // Between rounds — stay on round-results, just update waiting timer
         if (res.round_status === 'waiting') {
           clearInterval(pollRef.current);
+          setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(res.seconds_until_next);
-          setScreen('waiting');
+          // Stay on round-results screen — pill bar will show countdown
         }
       } catch (_) {}
     }, 3000);
     return () => clearInterval(pollRef.current);
-  }, [screen, eventId, currentRound, totalRounds]);
+  }, [screen, eventId, currentRound, totalRounds, lastBidAmount, roundCloseSecsLeft]);
 
-  // 7. waiting: tick countdown (seeded from server seconds_until_next)
+  // 7. waiting: tick countdown (seeded from server seconds_until_next) — runs on round-results screen now
   useEffect(() => {
-    if (screen !== 'waiting') return;
+    if (screen !== 'waiting' && screen !== 'round-results') return;
     if (!waitingSecsLeft || waitingSecsLeft <= 0) return;
     clearInterval(waitTimerRef.current);
     waitTimerRef.current = setInterval(() => {
@@ -244,6 +290,19 @@ const BidFlow: React.FC = () => {
     }, 1000);
     return () => clearInterval(waitTimerRef.current);
   }, [screen, !!waitingSecsLeft && waitingSecsLeft > 0]);
+
+  // 8a. confirm-bid: poll every 5s to refresh group member bid statuses
+  useEffect(() => {
+    if (screen !== 'confirm-bid') return;
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const d = await getCurrentRound(eventId);
+        setRoundData(d);
+      } catch (_) {}
+    }, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [screen, eventId]);
 
   // 8. waiting: poll every 5s for next round opening
   useEffect(() => {
@@ -264,7 +323,7 @@ const BidFlow: React.FC = () => {
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
-          setBidAmount(0); setInputVal('0');
+          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('bid-entry');
         } else if (res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
@@ -274,7 +333,7 @@ const BidFlow: React.FC = () => {
       } catch (_) {}
     }, 5000);
     return () => clearInterval(pollRef.current);
-  }, [screen, eventId]);
+  }, [screen, eventId, lastBidAmount]);
 
   // ── Confetti ──────────────────────────────────────────────────────────
   const spawnParticles = useCallback(() => {
@@ -326,9 +385,11 @@ const BidFlow: React.FC = () => {
     if (submitting) return;
     setSubmitError('');
     if (!bidAmount || bidAmount <= 0) { setSubmitError('Please enter a bid amount.'); return; }
+    if (lastBidAmount > 0 && bidAmount < lastBidAmount) { setSubmitError(`Bid must be at least £${lastBidAmount} (your previous bid).`); return; }
     setSubmitting(true);
     try {
       await submitBid(eventId, bidAmount);
+      setLastBidAmount(bidAmount);
       setScreen('submitted');
     } catch (e: any) {
       setSubmitError(e?.response?.data?.message ?? 'Failed to submit bid. Please try again.');
@@ -341,7 +402,7 @@ const BidFlow: React.FC = () => {
   };
 
   const adjustBid = (delta: number) => {
-    setBidAmount(prev => { const n = Math.max(0, prev + delta); setInputVal(String(n)); return n; });
+    setBidAmount(prev => { const n = Math.max(lastBidAmount, prev + delta); setInputVal(String(n)); return n; });
   };
 
   /* ── Derived ─────────────────────────────────────────────────────── */
@@ -351,14 +412,23 @@ const BidFlow: React.FC = () => {
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
   const isLastRound       = currentRound >= totalRounds;
-  const matchedAmount     = roundData?.matched_amount ?? 0;
-  const myCumulative      = roundData?.my_cumulative  ?? 0;
   const roundBids         = roundData?.round_bids      ?? [];
   const myBid             = roundData?.my_bid          ?? bidAmount;
   const myGroup           = roundData?.my_group        ?? null;
   const groupSize         = roundData?.group_size       ?? 4;
-  const groupTotal        = roundData?.group_total      ?? 0;
   const matchRatio        = roundData?.match_ratio      ?? '1:3';
+
+  // Calculate matched amount live from round_bids when backend hasn't grouped yet
+  const liveMinBid = roundBids.length > 0
+    ? Math.min(...roundBids.map((b: any) => b.amount))
+    : 0;
+  const matchedAmount = roundData?.matched_amount !== null && roundData?.matched_amount !== undefined
+    ? roundData.matched_amount
+    : liveMinBid;
+  const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
+    ? roundData.group_total
+    : liveMinBid * groupSize;
+  const myCumulative = roundData?.my_cumulative ?? 0;
 
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
@@ -414,11 +484,18 @@ const BidFlow: React.FC = () => {
       <div className="bf-s2">
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
         <div className="bf-amount-zone">
-          <p className="bf-amount-hint">Type your bid</p>
+          <p className="bf-amount-hint">Type your bid{lastBidAmount > 0 ? ` (min £${lastBidAmount})` : ''}</p>
           <div className="bf-amount-display">
             <span className="bf-pound">£</span>
             <input className="bf-amount-input" type="number" value={inputVal}
-              onChange={e => { setInputVal(e.target.value); const n = parseInt(e.target.value, 10); if (!isNaN(n)) setBidAmount(n); }}
+              onChange={e => {
+                setInputVal(e.target.value);
+                const n = parseInt(e.target.value, 10);
+                if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
+              }}
+              onBlur={() => {
+                if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+              }}
               inputMode="numeric" style={{ width: `${Math.max(inputVal.length, 1)}ch` }} />
           </div>
           <p className="bf-amount-sub">Enter your preferred bid amount</p>
@@ -515,6 +592,8 @@ const BidFlow: React.FC = () => {
   );
 
   /* ══════ S5: Round Results ══════ */
+  const resultsReady = roundData?.matched_amount !== null && roundData?.matched_amount !== undefined;
+
   if (screen === 'round-results') return (
     <IonPage><IonContent fullscreen className="bf-page" scrollY>
       <canvas ref={canvasRef} className="bf-canvas" />
@@ -536,7 +615,7 @@ const BidFlow: React.FC = () => {
               <circle cx="8.5" cy="7" r="2.5" stroke="#2BA7A0" strokeWidth="1.5"/>
               <path d="M17 18v-1.5a3 3 0 00-2-2.8M14 4.2a3 3 0 010 5.6" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
-            <span className="bf-stat3-val">{groupSize}</span><span className="bf-stat3-lbl">In Group</span>
+            <span className="bf-stat3-val">{roundBids.length > 0 ? roundBids.length : groupSize}</span><span className="bf-stat3-lbl">In Group</span>
           </div>
           <div className="bf-stat3">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -546,7 +625,10 @@ const BidFlow: React.FC = () => {
         <div className="bf-card bf-tealbg">
           <p className="bf-card-title">Your Contribution</p>
           <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{myBid}</span></div>
-          <div className="bf-card-row"><span className="bf-card-lbl">Matched Amount</span><span className="bf-card-val bf-teal">£{matchedAmount}</span></div>
+          <div className="bf-card-row">
+            <span className="bf-card-lbl">Matched Amount</span>
+            <span className="bf-card-val bf-teal">£{matchedAmount}</span>
+          </div>
           {myBid > matchedAmount && matchedAmount > 0 && (
             <p className="bf-card-note">Your higher bid helped create leverage! The match was set at £{matchedAmount} by another donor.</p>
           )}
@@ -579,17 +661,34 @@ const BidFlow: React.FC = () => {
           </div>
           <span className="bf-cumul-val">£{myCumulative}</span>
         </div>
-        <p style={{ textAlign:'center', color:'#9AA0A6', fontSize:13, margin:'16px 0 8px' }}>
-          {currentRound >= totalRounds
-            ? 'All rounds complete — preparing payment...'
-            : 'Waiting for next round...'}
-        </p>
-        {/* Show Make Payment immediately on last round */}
-        {currentRound >= totalRounds && (
-          <button className="bf-orange-btn bf-full-btn"
-            onClick={() => { getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {}); setScreen('payment-intro'); }}>
-            Make Payment →
-          </button>
+        {currentRound >= totalRounds ? (
+          <>
+            <p style={{ textAlign:'center', color:'#9AA0A6', fontSize:13, margin:'16px 0 8px' }}>All rounds complete — preparing payment...</p>
+            <button className="bf-orange-btn bf-full-btn"
+              onClick={() => { getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {}); setScreen('payment-intro'); }}>
+              Make Payment →
+            </button>
+          </>
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            background: '#F5F6F8', borderRadius: 65, padding: '14px 24px', margin: '16px 0 8px',
+            color: '#9AA0A6', fontSize: 14, fontWeight: 500,
+          }}>
+            <span>Round {currentRound + 1}</span>
+            {(roundCloseSecsLeft !== null && roundCloseSecsLeft > 0) || (waitingSecsLeft !== null && waitingSecsLeft > 0) ? (
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M6.66699 1.33337H9.33366" stroke="#9AA0A6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M8 9.33337L10 7.33337" stroke="#9AA0A6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#9AA0A6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                {roundCloseSecsLeft !== null && roundCloseSecsLeft > 0
+                  ? fmt(roundCloseSecsLeft)
+                  : fmt(waitingSecsLeft!)}
+              </span>
+            ) : null}
+          </div>
         )}
         <button className="bf-quit" onClick={handleQuit}>Quit Event</button>
         <div style={{ height: 48 }} />
@@ -630,13 +729,16 @@ const BidFlow: React.FC = () => {
             </div>
             <span className="bf-live-badge"><span className="bf-live-dot" />Live</span>
           </div>
-          <div className="bf-ec-timer bf-ec-timer--orange">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M6.66699 1.33337H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M8 9.33337L10 7.33337" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span>Round {currentRound + 1} {waitingSecsLeft !== null && waitingSecsLeft > 0 ? fmt(waitingSecsLeft) : ''}</span>
+          <div className="bf-ec-timer bf-ec-timer--orange" style={{ justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 600, color: '#25201D' }}>Round {currentRound + 1}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M6.66699 1.33337H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M8 9.33337L10 7.33337" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {waitingSecsLeft !== null && waitingSecsLeft > 0 ? fmt(waitingSecsLeft) : '—'}
+            </span>
           </div>
         </div>
         <button className="bf-quit" style={{ marginTop:8 }} onClick={handleQuit}>Quit Event</button>
