@@ -63,7 +63,7 @@ const Register: React.FC = () => {
   function validate(): boolean {
     const errs: Record<string, string> = {};
 
-    if (!name.trim())              errs.name     = 'Full name is required';
+    //if (!name.trim())              errs.name     = 'Full name is required';
     if (!email.trim())             errs.email    = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Enter a valid email';
     if (!password)                 errs.password = 'Password is required';
@@ -89,10 +89,13 @@ const Register: React.FC = () => {
     setError(null);
     if (!validate()) return;
 
+    // Derive name from the part before '@' in the email
+    const derivedName = email.split('@')[0];
+
     setLoading(true);
     try {
       await register({
-        name,
+        name: derivedName,
         email,
         password,
         password_confirmation: confirmPassword,
@@ -206,7 +209,7 @@ const Register: React.FC = () => {
           {/* Form */}
           <div className="form-area">
 
-            {/* Name */}
+            {/* Name 
             <div className="input-group">
               <label>Full Name</label>
               <div className={`input-box ${fieldErrors.name ? 'input-error' : ''}`}>
@@ -221,7 +224,7 @@ const Register: React.FC = () => {
                 />
               </div>
               {fieldErrors.name && <span className="field-error">{fieldErrors.name}</span>}
-            </div>
+            </div>*/}
 
             {/* Email */}
             <div className="input-group">
@@ -241,7 +244,7 @@ const Register: React.FC = () => {
               {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
             </div>
 
-            {/* Display Name — shown to all roles; hint text adapts */}
+            {/* Display Name — shown to all roles; hint text adapts 
             <div className="input-group">
               <label>Display Name <span className="optional">(optional)</span></label>
               <div className="input-box">
@@ -259,7 +262,7 @@ const Register: React.FC = () => {
                   ? 'This is how other donors will see you.'
                   : 'Your public display name.'}
               </span>
-            </div>
+            </div>*/}
 
             {/* Password */}
             <div className="input-group">

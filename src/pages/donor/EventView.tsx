@@ -28,8 +28,12 @@ function countdownSeconds(startedAt: string | null): number {
 }
 
 const formatTime = (sec: number) => {
-  const m = Math.floor(sec / 60);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
+  if (h > 0) {
+    return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  }
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 };
 
@@ -129,13 +133,16 @@ const EventView: React.FC = () => {
   };
 
   // ── Resolve image URLs ────────────────────────────────────────
+  // Only show real images from the event — no static fallbacks
   const slideImages = event?.images?.length
-    ? event.images.map(p => storageUrl(p) ?? '/assets/img/Slide1.jpg')
-    : ['/assets/img/Slide1.jpg', '/assets/img/Slide2.jpg', '/assets/img/Slide3.jpg'];
+    ? event.images.map(p => storageUrl(p) ?? '').filter(Boolean)
+    : [];
 
-  const logoSrc  = storageUrl(event?.logo) ?? '/assets/img/Heart.svg';
+  const logoSrc    = storageUrl(event?.logo) ?? '/assets/img/Heart.svg';
   const isMember   = event?.is_member ?? false;
+  const isLive     = event?.status === 'live';
   const isFinished = event?.status === 'finished';
+  const isUpcoming = !isLive && !isFinished;
 
   if (loading) {
     return (
@@ -183,15 +190,30 @@ const EventView: React.FC = () => {
 
           <p className="desc">{event.description}</p>
 
-          {/* TIMER — only shown if event hasn't started yet and donor has joined */}
-          {isMember && !isActive && (
+          {/* ── UPCOMING: shown to everyone ── */}
+          {isUpcoming && (
+            <>
+              <p className="starts">Event not yet started</p>
+              {seconds > 0 && (
+                <div className="timer">⏱ {formatTime(seconds)}</div>
+              )}
+            </>
+          )}
+
+          {/* ── LIVE: round-start countdown only for joined members ── */}
+          {isLive && isMember && !isActive && (
             <>
               <p className="starts">Event starts in</p>
               <div className="timer">⏱ {formatTime(seconds)}</div>
             </>
           )}
 
-          {/* IMAGE SLIDER */}
+          {/* ── FINISHED ── */}
+          {isFinished && (
+            <p className="starts">This event has ended</p>
+          )}
+
+          {/* IMAGE SLIDER — only shown when event has real images */}
           {slideImages.length > 0 && (
             <Swiper
               slidesPerView={1.2}
@@ -210,25 +232,27 @@ const EventView: React.FC = () => {
 
         </div>
 
-        {/* ── BOTTOM BUTTON — hidden for finished events ── */}
-        {!isFinished && (
-          !isMember ? (
-            <div className="bottom-btn active" onClick={handleJoin}>
-              Join Event
-              <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
-                <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-                <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-              </svg>
-            </div>
-          ) : (
-            <div className={`bottom-btn ${isActive ? 'active' : ''}`} onClick={handleStart}>
-              Start Funding
-              <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
-                <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-                <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
-              </svg>
-            </div>
-          )
+        {/* ── BOTTOM BUTTON ── */}
+        {/* Join: only for live events where donor hasn't joined yet */}
+        {isLive && !isMember && (
+          <div className="bottom-btn active" onClick={handleJoin}>
+            Join Event
+            <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
+              <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </div>
+        )}
+
+        {/* Start Funding: only for members on live events */}
+        {isLive && isMember && (
+          <div className={`bottom-btn ${isActive ? 'active' : ''}`} onClick={handleStart}>
+            Start Funding
+            <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none">
+              <path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+              <path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </div>
         )}
 
       </IonContent>

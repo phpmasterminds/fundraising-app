@@ -8,12 +8,19 @@ import { getEventByCode } from '../../services/donorEvents';
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function countdownFrom(startedAt?: string): string | null {
-  if (!startedAt) return null;
+function secondsUntil(startedAt?: string): number {
+  if (!startedAt) return 0;
   const diff = Math.floor((new Date(startedAt).getTime() - Date.now()) / 1000);
-  if (diff <= 0) return null;
-  const mm = String(Math.floor(diff / 60)).padStart(2, '0');
-  const ss = String(diff % 60).padStart(2, '0');
+  return Math.max(0, diff);
+}
+
+function formatCountdown(sec: number): string {
+  const h  = Math.floor(sec / 3600);
+  const m  = Math.floor((sec % 3600) / 60);
+  const s  = sec % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  if (h > 0) return `${h}:${mm}:${ss}`;
   return `${mm}:${ss}`;
 }
 
@@ -41,16 +48,19 @@ const TABS: { key: DonorEventTab; label: string }[] = [
 
 const DEventList: React.FC = () => {
   const router = useIonRouter();
-  const [activeTab, setActiveTab]       = useState<DonorEventTab>('upcoming');
-  const [events, setEvents]             = useState<Event[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState<string | null>(null);
+  const [activeTab, setActiveTab]         = useState<DonorEventTab>('upcoming');
+  const [events, setEvents]               = useState<Event[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [error, setError]                 = useState<string | null>(null);
   const [showCodeModal, setShowCodeModal] = useState(false);
-  const [code, setCode]                 = useState('');
-  const [codeLoading, setCodeLoading]   = useState(false);
-  const [codeError, setCodeError]       = useState<string | null>(null);
-  const codeInputRef                    = useRef<HTMLInputElement>(null);
+  const [code, setCode]                   = useState('');
+  const [codeLoading, setCodeLoading]     = useState(false);
+  const [codeError, setCodeError]         = useState<string | null>(null);
+  // tick state — increments every second to force re-render of countdowns
+  const [tick, setTick]                   = useState(0);
+  const codeInputRef                      = useRef<HTMLInputElement>(null);
 
+  // ── Fetch events ──────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -63,7 +73,20 @@ const DEventList: React.FC = () => {
     return () => { cancelled = true; };
   }, [activeTab]);
 
-  // Focus input when modal opens
+  // ── Global countdown ticker ───────────────────────────────────
+  // Runs once the events are loaded; ticks every second so all
+  // countdown badges re-render simultaneously.
+  useEffect(() => {
+    const hasCountdown = events.some(
+      e => e.status === 'draft' && secondsUntil(e.started_at) > 0
+    );
+    if (!hasCountdown) return;
+
+    const timer = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [events]);
+
+  // ── Focus input when modal opens ──────────────────────────────
   useEffect(() => {
     if (showCodeModal) {
       setTimeout(() => codeInputRef.current?.focus(), 300);
@@ -141,8 +164,9 @@ const DEventList: React.FC = () => {
 
           {/* ── Event cards ── */}
           {!loading && !error && events.map(event => {
-            const logo      = logoUrl(event.logo);
-            const countdown = countdownFrom(event.started_at);
+            const logo = logoUrl(event.logo);
+            // `tick` is referenced so this re-evaluates every second
+            const secs = secondsUntil(event.started_at);
 
             return (
               <div
@@ -178,14 +202,17 @@ const DEventList: React.FC = () => {
                   {event.status === 'live' && (
                     <div className="badge live">Live Event</div>
                   )}
-                  {event.status === 'draft' && countdown && (
-                    <div className="badge upcoming">Live in ⏱ {countdown}</div>
+
+                  {event.status === 'draft' && secs > 0 && (
+                    <div className="badge upcoming">Live in ⏱ {formatCountdown(secs)}</div>
                   )}
-                  {event.status === 'draft' && !countdown && (
+
+                  {event.status === 'draft' && secs === 0 && (
                     <div className="badge scheduled">
                       Scheduled · {formatDate(event.started_at)}
                     </div>
                   )}
+
                   {event.status === 'finished' && (
                     <div className="badge scheduled">
                       Finished · {formatDate(event.started_at)}
