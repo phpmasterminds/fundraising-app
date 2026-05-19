@@ -4,7 +4,7 @@ const API = import.meta.env.VITE_API_URL;
 
 const authHeaders = () => ({
   'Content-Type':  'application/json',
-  'Accept':        'application/json',          // ← this line must be there
+  'Accept':        'application/json',
   'Authorization': `Bearer ${localStorage.getItem('auth_token') ?? ''}`,
 });
 
@@ -19,6 +19,12 @@ export interface PasswordPayload {
   current_password: string;
   password: string;
   password_confirmation: string;
+}
+
+export interface HostStats {
+  events_count: number;
+  total_raised: number;
+  donors_count: number;
 }
 
 // ── Update profile (name + pseudonym) ───────────────────
@@ -55,4 +61,18 @@ export const changePassword = async (payload: PasswordPayload): Promise<void> =>
     const data = await res.json().catch(() => ({}));
     throw new Error(data.message ?? 'Failed to change password');
   }
+};
+
+// ── Get host stats (events, total raised, donors) ───────
+export const getHostStats = async (): Promise<HostStats> => {
+  const res = await fetch(`${API}/profile/stats`, {
+    headers: authHeaders(),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message ?? 'Failed to load stats');
+  }
+
+  return res.json();
 };

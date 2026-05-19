@@ -3,11 +3,11 @@ import {
   IonContent
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './HostProfile.css';
 import HostHeader from '../../components/HostHeader';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
-import { updateProfile, changePassword } from '../../services/profileService';
+import { updateProfile, changePassword, getHostStats, HostStats } from '../../services/profileService';
 
 const HostProfile: React.FC = () => {
   const router = useIonRouter();
@@ -36,6 +36,13 @@ const HostProfile: React.FC = () => {
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwSuccess,   setPwSuccess]   = useState(false);
 
+  // ── Stats state ───────────────────────────────────────
+  const [stats, setStats] = useState<HostStats>({
+    events_count: 0,
+    total_raised: 0,
+    donors_count: 0,
+  });
+
   // ── Photo upload ──────────────────────────────────────
   const { preview, uploading, error: uploadError, handleFileChange } = usePhotoUpload(
     ({ url, path }) => {
@@ -45,7 +52,6 @@ const HostProfile: React.FC = () => {
   );
 
   // Build avatar URL from auth_user.avatar (e.g. "avatars/1/Eof…")
-  // falling back to a separately stored URL, then to the fresh upload preview
   const buildStorageUrl = (path: string) => {
     const base = import.meta.env.VITE_API_URL.replace(/\/api$/, '');
     return `${base}/storage/${path}`;
@@ -54,6 +60,13 @@ const HostProfile: React.FC = () => {
   const avatarUrl =
     preview ??
     (storedUser.avatar ? buildStorageUrl(storedUser.avatar) : null);
+
+  // ── Fetch stats on mount ──────────────────────────────
+  useEffect(() => {
+    getHostStats()
+      .then(setStats)
+      .catch(() => {}); // fail silently — stats are non-critical
+  }, []);
 
   // ── Sign out ──────────────────────────────────────────
   const handleSignOut = () => {
@@ -107,6 +120,14 @@ const HostProfile: React.FC = () => {
     } finally {
       setPwSaving(false);
     }
+  };
+
+  // ── Format total raised ───────────────────────────────
+  const formatRaised = (amount: number) => {
+    if (amount >= 1000) {
+      return `£${(amount / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+    }
+    return `£${amount.toLocaleString()}`;
   };
 
   return (
@@ -166,17 +187,17 @@ const HostProfile: React.FC = () => {
           {/* ── Stats Card ── */}
           <div className="hp-stats">
             <div className="hp-stat">
-              <span className="hp-stat-num">12</span>
+              <span className="hp-stat-num">{stats.events_count}</span>
               <span className="hp-stat-label">Events</span>
             </div>
             <div className="hp-stat-divider" />
             <div className="hp-stat">
-              <span className="hp-stat-num">£48,200</span>
+              <span className="hp-stat-num">{formatRaised(stats.total_raised)}</span>
               <span className="hp-stat-label">Total Raised</span>
             </div>
             <div className="hp-stat-divider" />
             <div className="hp-stat">
-              <span className="hp-stat-num">340</span>
+              <span className="hp-stat-num">{stats.donors_count}</span>
               <span className="hp-stat-label">Donors</span>
             </div>
           </div>
