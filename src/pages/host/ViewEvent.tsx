@@ -748,14 +748,28 @@ const ViewEvent: React.FC = () => {
               <div className="ve-qr-section-title">Join Information</div>
               <div className="ve-qr-box">
                 {apiEvent?.join_code ? (
-                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(`${window.location.origin}/join?code=${apiEvent.join_code}`)}`} alt="QR Code" style={{ width: 180, height: 180, objectFit: 'contain' }} />
+                  <>
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent.join_code}`)}`}
+                      alt="QR Code"
+                      style={{ width: 180, height: 180, objectFit: 'contain' }}
+                    />
+                    <div
+                      style={{ marginTop: 10, fontSize: 12, color: '#9AA0A6', cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => {
+                        const link = `${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent.join_code}`;
+                        navigator.clipboard?.writeText(link);
+                      }}
+                    >
+                    </div>
+                  </>
                 ) : (
                   <div style={{ width: 180, height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9AA0A6', fontSize: 13, border: '1px dashed #C4C4C4', borderRadius: 8 }}>No QR yet</div>
                 )}
               </div>
               <div className="ve-qr-section-title" style={{ marginTop: 20 }}>Public Join Link</div>
               <div className="ve-join-link-box">
-                <span className="ve-join-link-text">{`${window.location.origin}/join?code=${apiEvent?.join_code ?? ''}`}</span>
+                <span className="ve-join-link-text">{`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent?.join_code ?? ''}`}</span>
               </div>
               <div className="ve-qr-divider" />
               <div className="ve-qr-section-title">Event Configuration</div>
