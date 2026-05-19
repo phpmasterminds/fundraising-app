@@ -9,6 +9,7 @@ import {
   submitBid,
   quitEvent,
   getPaymentSummary,
+  markPaid,
   type RoundState,
   type PaymentSummary,
 } from '../../services/donorEvents';
@@ -85,6 +86,7 @@ const BidFlow: React.FC = () => {
 
   const [paymentData,  setPaymentData]  = useState<PaymentSummary | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [hasPaid,      setHasPaid]      = useState(false); // blocks further bidding
 
   const roundTimerRef = useRef<any>(null);
   const waitTimerRef  = useRef<any>(null);
@@ -108,7 +110,12 @@ const BidFlow: React.FC = () => {
 
     // Always check round status first to handle finished events immediately
     getRoundStatus(stateEventId).then(res => {
-      if (res.event_status === 'finished' || res.round_status === 'finished') {
+      if (res.payment_status === 'paid') {
+        // Already paid — go straight to receipt
+        setHasPaid(true);
+        getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
+        setScreen('receipt');
+      } else if (res.event_status === 'finished' || res.round_status === 'finished') {
         setScreen('payment-intro');
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
       } else if (res.current_round > 0) {
@@ -401,6 +408,14 @@ const BidFlow: React.FC = () => {
     router.goBack();
   };
 
+  const handleMarkPaid = async () => {
+    try { await markPaid(eventId); } catch (_) {}
+    // Clear last bid from localStorage — donor cannot bid again
+    localStorage.removeItem(`peerfund_lastbid_${stateEventId}`);
+    setHasPaid(true);
+    setScreen('receipt');
+  };
+
   const adjustBid = (delta: number) => {
     setBidAmount(prev => { const n = Math.max(lastBidAmount, prev + delta); setInputVal(String(n)); return n; });
   };
@@ -429,6 +444,14 @@ const BidFlow: React.FC = () => {
     ? roundData.group_total
     : liveMinBid * groupSize;
   const myCumulative = roundData?.my_cumulative ?? 0;
+
+  // displayCumulative: backend my_cumulative already sums all closed rounds' min_amount
+  // plus live min bid for current open round (handled in calcCumulative on backend)
+  const displayCumulative = myCumulative;
+
+  // Payment total: always use server value — fetch via getPaymentSummary when event finishes
+  const paymentTotal = paymentData?.total_amount
+    ?? (paymentData?.rounds_detail?.reduce((s: number, r: any) => s + r.matched, 0) || displayCumulative);
 
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
@@ -659,7 +682,7 @@ const BidFlow: React.FC = () => {
             <p className="bf-card-title bf-card-title--sm">Your Cumulative Total</p>
             <p className="bf-card-lbl" style={{ marginTop: 2 }}>Including all rounds so far</p>
           </div>
-          <span className="bf-cumul-val">£{myCumulative}</span>
+          <span className="bf-cumul-val">£{displayCumulative}</span>
         </div>
         {currentRound >= totalRounds ? (
           <>
@@ -773,7 +796,7 @@ const BidFlow: React.FC = () => {
           </div>
           <h2 className="bf-pay-intro-title">Thank you, <strong>{paymentData?.donor_name ?? myPseudonym}</strong></h2>
           <p className="bf-pay-intro-sub">The event has concluded. Your final pledge is:</p>
-          <p className="bf-pay-intro-amount">£{paymentData?.total_amount ?? myCumulative}</p>
+          <p className="bf-pay-intro-amount">£{paymentTotal}</p>
           <div className="bf-carousel" style={{ width:'100%' }}>
             <Swiper modules={[Pagination, EffectCoverflow]} effect="coverflow" grabCursor centeredSlides slidesPerView="auto"
               coverflowEffect={{ rotate:0, stretch:0, depth:100, modifier:2.5, slideShadows:false }}
@@ -790,7 +813,7 @@ const BidFlow: React.FC = () => {
             Make Your Payment
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/></svg>
           </button>
-          <button className="bf-teal-btn" onClick={() => setScreen('receipt')}>
+          <button className="bf-teal-btn" onClick={handleMarkPaid}>
             Mark as Paid Offline
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4.16699 10H15.8337" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/></svg>
           </button>
@@ -819,7 +842,7 @@ const BidFlow: React.FC = () => {
         </div>
         <div className="bf-pay-summary-card">
           <p className="bf-pay-summary-label">Your Total Donation</p>
-          <p className="bf-pay-summary-amount">£{paymentData?.total_amount ?? myCumulative}</p>
+          <p className="bf-pay-summary-amount">£{paymentTotal}</p>
           <p className="bf-pay-summary-desc">Based on matched minimum bids across all rounds</p>
           <div className="bf-pay-summary-divider" />
           {(paymentData?.rounds_detail ?? []).map((r, i: number) => (
@@ -830,14 +853,14 @@ const BidFlow: React.FC = () => {
           ))}
           <div className="bf-pay-summary-row"><span className="bf-pay-summary-row-lbl">Processing fee</span><span className="bf-pay-summary-row-val bf-teal1">Free</span></div>
           <div className="bf-pay-summary-divider" />
-          <div className="bf-pay-summary-row bf-pay-summary-row--total"><span>Total</span><span>£{paymentData?.total_amount ?? myCumulative}</span></div>
+          <div className="bf-pay-summary-row bf-pay-summary-row--total"><span>Total</span><span>£{paymentTotal}</span></div>
         </div>
         <div style={{ flex: 1 }} />
         <div className="bf-pay-form-footer">
           <div className="bf-pay-redirect-note">
             <span>We will redirect you to {paymentData?.charity_link ?? 'the charity page'} to complete payment.</span>
           </div>
-          <button className="bf-orange-btn" onClick={() => setScreen('receipt')}>
+          <button className="bf-orange-btn" onClick={handleMarkPaid}>
             Continue <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none"><path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/></svg>
           </button>
         </div>
@@ -864,7 +887,7 @@ const BidFlow: React.FC = () => {
             <span className="bf-receipt-card-title">Donation Receipt</span>
           </div>
           {[
-            { label: 'Amount',    val: `£${paymentData?.total_amount ?? myCumulative}`, teal: true },
+            { label: 'Amount',    val: `£${paymentTotal}`, teal: true },
             { label: 'Charity',   val: paymentData?.charity_name ?? '—' },
             { label: 'Event',     val: paymentData?.event_name   ?? eventName },
             { label: 'Donor',     val: paymentData?.donor_name   ?? myPseudonym },
@@ -882,7 +905,7 @@ const BidFlow: React.FC = () => {
           <div className="bf-difference-header">
             <span className="bf-difference-title">You made a difference</span>
           </div>
-          <p className="bf-difference-desc">Through peer matching, your £{paymentData?.total_amount ?? myCumulative} donation helped raise funds for {paymentData?.charity_name ?? 'the charity'}.</p>
+          <p className="bf-difference-desc">Through peer matching, your £{paymentTotal} donation helped raise funds for {paymentData?.charity_name ?? 'the charity'}.</p>
         </div>
         <button className="bf-teal-btn bf-teal-btn--full" onClick={() => router.goBack()}>Back to lobby</button>
         <div style={{ height: 48 }} />

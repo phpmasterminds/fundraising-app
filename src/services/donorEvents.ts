@@ -83,6 +83,7 @@ export interface PaymentSummary {
   reference:      string;
   date:           string;
   rounds_detail:  { round: number; matched: number }[];
+  payment_status: 'paid' | 'unpaid'; // whether donor has already paid
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ export async function getPaymentSummary(eventId: number): Promise<PaymentSummary
 }
 
 /** POST /donor/events/:id/payment/mark-paid */
-export async function markPaidOffline(eventId: number): Promise<{ success: boolean }> {
+export async function markPaid(eventId: number): Promise<{ success: boolean }> {
   const { data } = await api.post(`/donor/events/${eventId}/payment/mark-paid`);
   return data;
 }
@@ -178,6 +179,7 @@ export interface RoundStatus {
   round_status:       'open' | 'waiting' | 'finished';
   seconds_left:       number | null;
   seconds_until_next: number | null;
+  payment_status?:    'paid' | 'unpaid'; // present when donor has paid
 }
 
 export async function getRoundStatus(eventId: number): Promise<RoundStatus> {
