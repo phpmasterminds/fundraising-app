@@ -124,12 +124,19 @@ const ViewEvent: React.FC = () => {
 
   const eventId = new URLSearchParams(location.search).get('id');
 
+  const seedCountdown = (data: Event) => {
+    const roundTimeSecs = (data as any).round_time ?? 0;
+    const elapsed       = data.current_round_timer?.seconds ?? 0;
+    const remaining     = Math.max(0, roundTimeSecs - elapsed);
+    setTimerSecs(remaining);
+  };
+
   const refreshEvent = async () => {
     if (!eventId) return;
     const data = await getEvent(Number(eventId));
     setApiEvent(data);
     if (data.current_round_timer != null) {
-      setTimerSecs(data.current_round_timer);
+      seedCountdown(data);
     }
   };
 
@@ -141,15 +148,15 @@ const ViewEvent: React.FC = () => {
       setEditCharityName(data.charity_name ?? '');
       setEditTargetAmount(String(data.target_amount ?? ''));
       if (data.current_round_timer != null) {
-        setTimerSecs(data.current_round_timer);
+        seedCountdown(data);
       }
     });
   }, [location.search]);
 
-  // ─── Live timer ───────────────────────────────────────────────────────────
+  // ─── Live countdown timer ─────────────────────────────────────────────────
   useEffect(() => {
     if (apiEvent?.status !== 'live') return;
-    timerRef.current = setInterval(() => setTimerSecs(s => s + 1), 1000);
+    timerRef.current = setInterval(() => setTimerSecs(s => Math.max(0, s - 1)), 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [apiEvent?.status]);
 
@@ -266,12 +273,12 @@ const ViewEvent: React.FC = () => {
   const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
 
   // Show "Proposed Group Allocations" button when a round just closed
-  // (live event, no open round, rounds remaining, groups exist)
+  // (live event, no open round, at least one closed round, not all rounds done)
+  const hasClosedRound  = rounds.some(r => r.status === 'complete');
   const roundJustClosed = !hasOpenRound &&
-    rounds.length > 0 &&
+    hasClosedRound &&
     !allRoundsDone &&
-    apiEvent?.status === 'live' &&
-    (apiEvent?.current_groups?.length ?? 0) > 0;
+    apiEvent?.status === 'live';
 
   // ─── Build PgaGroup[] from API current_groups ────────────────────────────
   const buildPgaGroups = (apiGroups: ApiGroup[]): PgaGroup[] =>
@@ -291,10 +298,9 @@ const ViewEvent: React.FC = () => {
     }));
 
   const openPGA = () => {
-    if (!apiEvent?.current_groups?.length) return;
     const lastRound = rounds.find(r => r.status === 'complete');
     setPgaRoundId(lastRound?.id ?? null);
-    setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+    setPgaGroups(apiEvent?.current_groups?.length ? buildPgaGroups(apiEvent.current_groups) : []);
     setShowPGA(true);
   };
 
@@ -639,14 +645,14 @@ const ViewEvent: React.FC = () => {
                   <path d="M6 9.3335H2.66667C2.29848 9.3335 2 9.63197 2 10.0002V13.3335C2 13.7017 2.29848 14.0002 2.66667 14.0002H6C6.36819 14.0002 6.66667 13.7017 6.66667 13.3335V10.0002C6.66667 9.63197 6.36819 9.3335 6 9.3335Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
                 <span className="ve-round-title">Round {currentRoundNum}</span>
-                {apiEvent?.current_round_timer && (
-                  <div className="ve-round-timer">
+                {hasOpenRound && (
+                  <div className="ve-round-timer" style={{ background: '#FFF3E6', color: '#FCB040' }}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                      <path d="M6.66699 1.3335H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M8 9.3335L10 7.3335" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M6.66699 1.3335H9.33366" stroke="#FCB040" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8 9.3335L10 7.3335" stroke="#FCB040" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#FCB040" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
-                    {`${apiEvent.current_round_timer.human} · ${formatElapsed(apiEvent.current_round_timer.seconds)}`}
+                    {formatTimer(timerSecs)}
                   </div>
                 )}
                 <span className="ve-round-complete">{hasOpenRound ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>
@@ -707,7 +713,7 @@ const ViewEvent: React.FC = () => {
 
           {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && !roundJustClosed && (
             <div className="ve-launch-btn ve-launch-btn--arrow" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={handleStartRound}>
-              {actionLoading ? 'Starting…' : `Launch Round ${rounds.length + 1} →`}
+              {actionLoading ? 'Starting…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
             </div>
           )}
 
@@ -969,6 +975,13 @@ const ViewEvent: React.FC = () => {
 
               {/* Scrollable group list */}
               <div className="ve-pga-group-list">
+                {pgaGroups.length === 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px', gap: 12, color: '#9AA0A6', textAlign: 'center' }}>
+                    <span style={{ fontSize: 40 }}>👥</span>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: '#1A1A2E' }}>No group members yet</span>
+                    <span style={{ fontSize: 13 }}>No donors placed bids in this round. The next round will start automatically.</span>
+                  </div>
+                )}
                 {pgaGroups.map(group => {
                   const selectedCount = group.members.filter(m => m.selected).length;
                   return (
@@ -1033,7 +1046,7 @@ const ViewEvent: React.FC = () => {
               {/* Sticky footer */}
               <div className="ve-pga-footer">
                 <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={pgaLaunchNextRound}>
-                  {actionLoading ? 'Launching…' : `Launch Round ${rounds.length + 1} →`}
+                  {actionLoading ? 'Launching…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
                 </div>
                 <div className="ve-end-btn" onClick={() => setShowPGA(false)}>End Event</div>
               </div>

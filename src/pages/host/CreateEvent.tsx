@@ -6,6 +6,7 @@ import {
 } from '@ionic/react';
 import { useState, useMemo } from 'react';
 import { useIonRouter } from '@ionic/react';
+import { useHistory } from 'react-router-dom';
 import './CreateEvent.css';
 import HostHeader from '../../components/HostHeader';
 import { createEvent } from '../../services/events';
@@ -15,6 +16,7 @@ import type { ApiError } from '../../services/api';
 const CreateEvent: React.FC = () => {
 
   const router = useIonRouter();
+  const history = useHistory();
 
   // ─── Logo (avatar) ────────────────────────────────────────────────────────
   const [logoFile, setLogoFile]           = useState<File | null>(null);
@@ -137,7 +139,7 @@ const CreateEvent: React.FC = () => {
         images:        imageFiles.length ? imageFiles : undefined,
       });
 
-      window.location.href = '/events';
+      history.replace('/events');
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.errors) {

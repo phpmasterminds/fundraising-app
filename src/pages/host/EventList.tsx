@@ -1,10 +1,10 @@
 import {
   IonPage,
-  IonContent
+  IonContent,
+  useIonViewDidEnter
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 import './EventList.css';
 import HostHeader from '../../components/HostHeader';
 import { getEvents, unlistEvent, logoUrl } from '../../services/events';
@@ -18,24 +18,29 @@ const EventList: React.FC = () => {
   const [events, setEvents]         = useState<Event[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
-  const location = useLocation();
+  // ─── Core fetch ───────────────────────────────────────────────────────────
+  const fetchEvents = async (tab: HostEventTab) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getEvents(tab);
+      setEvents(data);
+    } catch (err) {
+      setError('Failed to load events.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // ─── Fetch events whenever tab changes ────────────────────────────────────
+  // Fires after page transition completes — works even on cached/back-nav pages
+  useIonViewDidEnter(() => {
+    fetchEvents(activeTab);
+  });
+
+  // Re-fetch when user switches tabs
   useEffect(() => {
-    const fetchEvents = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getEvents(activeTab);
-        setEvents(data);
-      } catch (err) {
-        setError('Failed to load events.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchEvents();
-  }, [activeTab, location.search]);
+    fetchEvents(activeTab);
+  }, [activeTab]);
 
   // ─── Unlist handler ───────────────────────────────────────────────────────
   const handleUnlist = async (e: React.MouseEvent, eventId: number) => {
@@ -211,9 +216,9 @@ const EventList: React.FC = () => {
                 {event.status === 'draft' && event.started_at && (
                   <div className="badge upcoming">
                     Live in <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6.66699 1.3335H9.33366" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 9.3335L10 7.3335" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M6.66699 1.3335H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M8 9.3335L10 7.3335" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
 </svg> {formatStartedAt(event.started_at)}
                   </div>
                 )}
