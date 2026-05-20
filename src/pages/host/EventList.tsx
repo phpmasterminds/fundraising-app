@@ -13,11 +13,11 @@ import type { Event, HostEventTab } from '../../services/events';
 const EventList: React.FC = () => {
   const router = useIonRouter();
 
-  const [activeTab, setActiveTab]   = useState<HostEventTab>('upcoming');
-  const [openMenu, setOpenMenu]     = useState<number | null>(null);
-  const [events, setEvents]         = useState<Event[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<HostEventTab>('upcoming');
+  const [openMenu, setOpenMenu] = useState<number | null>(null);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   // ─── Core fetch ───────────────────────────────────────────────────────────
   const fetchEvents = async (tab: HostEventTab) => {
     setLoading(true);
@@ -38,10 +38,19 @@ const EventList: React.FC = () => {
   });
 
   // Re-fetch when user switches tabs
+  // Re-fetch when user switches tabs
   useEffect(() => {
     fetchEvents(activeTab);
   }, [activeTab]);
 
+  // Auto refresh every 15 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchEvents(activeTab);
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [activeTab]);
   // ─── Unlist handler ───────────────────────────────────────────────────────
   const handleUnlist = async (e: React.MouseEvent, eventId: number) => {
     e.stopPropagation();
@@ -168,19 +177,21 @@ const EventList: React.FC = () => {
                 <div className="card-header-row">
                   <h3>{event.name}</h3>
 
-                  <div
-                    className="menu"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenMenu(openMenu === index ? null : index);
-                    }}
-                  >
-                    <img src="/assets/img/Option.svg" />
-                  </div>
+                  {event.status !== 'finished' && event.status !== 'unlisted' && (
+                    <div
+                      className="menu"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenu(openMenu === index ? null : index);
+                      }}
+                    >
+                      <img src="/assets/img/Option.svg" />
+                    </div>
+                  )}
 
                   {openMenu === index && (
                     <div className="dropdown" onClick={(e) => e.stopPropagation()}>
-                      {event.status !== 'unlisted' && (
+                      {event.status !== 'unlisted' && event.status !== 'finished' && (
                         <div
                           className="dropdown-item"
                           onClick={(e) => handleUnlist(e, event.id)}
@@ -216,10 +227,10 @@ const EventList: React.FC = () => {
                 {event.status === 'draft' && event.started_at && (
                   <div className="badge upcoming">
                     Live in <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M6.66699 1.3335H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-<path d="M8 9.3335L10 7.3335" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-<path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-</svg> {formatStartedAt(event.started_at)}
+                      <path d="M6.66699 1.3335H9.33366" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M8 9.3335L10 7.3335" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg> {formatStartedAt(event.started_at)}
                   </div>
                 )}
 

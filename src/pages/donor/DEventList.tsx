@@ -61,17 +61,44 @@ const DEventList: React.FC = () => {
   const codeInputRef                      = useRef<HTMLInputElement>(null);
 
   // ── Fetch events ──────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+// ── Fetch events + Auto Refresh ──────────────────────────────
+useEffect(() => {
+  let cancelled = false;
 
-    getDonorEvents(activeTab)
-      .then(data => { if (!cancelled) { setEvents(data); setLoading(false); } })
-      .catch(() => { if (!cancelled) { setError('Could not load events.'); setLoading(false); } });
+  const loadEvents = async () => {
+    try {
+      if (!cancelled) {
+        setError(null);
+      }
 
-    return () => { cancelled = true; };
-  }, [activeTab]);
+      const data = await getDonorEvents(activeTab);
+
+      if (!cancelled) {
+        setEvents(data);
+        setLoading(false);
+      }
+    } catch (err) {
+      if (!cancelled) {
+        setError('Could not load events.');
+        setLoading(false);
+      }
+    }
+  };
+
+  // Initial load
+  setLoading(true);
+  loadEvents();
+
+  // Auto refresh every 10 seconds
+  const interval = setInterval(() => {
+    loadEvents();
+  }, 10000);
+
+  return () => {
+    cancelled = true;
+    clearInterval(interval);
+  };
+}, [activeTab]);
 
   // ── Global countdown ticker ───────────────────────────────────
   // Runs once the events are loaded; ticks every second so all

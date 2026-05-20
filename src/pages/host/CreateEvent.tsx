@@ -243,24 +243,135 @@ const CreateEvent: React.FC = () => {
             min={1}
           />
           {fieldErrors.target_amount && <span className="field-error">{fieldErrors.target_amount}</span>}
+	
+{/* Date & Time */}
+{/* Date & Time */}
+<div className="row">
 
-          {/* Date & Time */}
-          <div className="row">
-            <div className="col">
-              <label>Start Date</label>
-              <div className="fake-input" onClick={() => setShowDate(true)}>
-                <span style={{ color: date ? '#25201D' : '#ccc' }}>{date || 'DD-MM-YYYY'}</span>
-                <img src="/assets/img/calendar.svg" alt="" />
-              </div>
-            </div>
-            <div className="col">
-              <label>Start Time</label>
-              <div className="fake-input" onClick={() => setShowTime(true)}>
-                <span style={{ color: time ? '#25201D' : '#ccc' }}>{time || 'HH:MM'}</span>
-                <img src="/assets/img/clock.svg" alt="" />
-              </div>
-            </div>
-          </div>
+  {/* DATE */}
+  <div className="col">
+    <label>Start Date</label>
+
+    <div className="fake-input premium-picker">
+
+      <span
+        style={{
+          color: rawDate ? '#25201D' : '#ccc'
+        }}
+      >
+        {date || 'DD-MM-YYYY'}
+      </span>
+
+      <img
+        src="/assets/img/calendar.svg"
+        alt=""
+      />
+
+      <input
+        type="date"
+        className="hidden-date-input"
+        min={new Date().toISOString().split('T')[0]}
+        value={rawDate}
+        onChange={(e) => {
+
+          const selectedDate = e.target.value;
+
+          if (!selectedDate) return;
+
+          setRawDate(selectedDate);
+
+          const [yyyy, mm, dd] =
+            selectedDate.split('-');
+
+          setDate(`${dd}-${mm}-${yyyy}`);
+
+          // reset time when date changes
+          setRawTime('');
+          setTime('');
+        }}
+      />
+    </div>
+  </div>
+
+  {/* TIME */}
+  <div className="col">
+    <label>Start Time</label>
+
+    <div
+      className={`fake-input premium-picker ${
+        !rawDate ? 'disabled-picker' : ''
+      }`}
+    >
+
+      <span
+        style={{
+          color: rawTime ? '#25201D' : '#ccc'
+        }}
+      >
+        {time || 'HH:MM'}
+      </span>
+
+      <img
+        src="/assets/img/clock.svg"
+        alt=""
+      />
+
+      <input
+        type="time"
+        className="hidden-date-input"
+        step="300"
+        disabled={!rawDate}
+        value={rawTime}
+        min={
+          rawDate ===
+          new Date().toISOString().split('T')[0]
+            ? new Date(
+                Date.now() + 5 * 60000
+              )
+                .toTimeString()
+                .slice(0, 5)
+            : undefined
+        }
+        onChange={(e) => {
+
+          const selectedTime =
+            e.target.value;
+
+          if (!selectedTime) return;
+
+          // prevent past time for today
+          if (
+            rawDate ===
+            new Date().toISOString().split('T')[0]
+          ) {
+
+            const now = new Date();
+
+            const currentTotal =
+              now.getHours() * 60 +
+              now.getMinutes();
+
+            const [hh, mm] =
+              selectedTime.split(':');
+
+            const selectedTotal =
+              parseInt(hh) * 60 +
+              parseInt(mm);
+
+            if (
+              selectedTotal <= currentTotal
+            ) {
+              return;
+            }
+          }
+
+          setRawTime(selectedTime);
+          setTime(selectedTime);
+        }}
+      />
+    </div>
+  </div>
+</div>
 
           {/* Duration — how long each round lasts, stepper in 5-min increments */}
           <label>Round Duration</label>
@@ -403,49 +514,113 @@ const CreateEvent: React.FC = () => {
 
         </div>
 
-        {/* ── DATE MODAL ── */}
-        <IonModal isOpen={showDate} onDidDismiss={() => setShowDate(false)} keepContentsMounted={true}>
-          <div className="picker-header">
-            <span onClick={() => setShowDate(false)}>←</span>
-            <h3>Select Date</h3>
-          </div>
-          <IonDatetime
-            presentation="date"
-            onIonChange={(e) => {
-              const val = e.detail.value as string;
-              if (!val) return;
-              const datePart = val.split('T')[0];
-              const [yyyy, mm, dd] = datePart.split('-');
-              setRawDate(datePart);
-              setDate(`${dd}-${mm}-${yyyy}`);
-            }}
-          />
-          <div style={{ padding: '0 16px 32px' }}>
-            <button className="create-btn create-btn--active" onClick={() => setShowDate(false)}>Confirm</button>
-          </div>
-        </IonModal>
+<IonModal
+  isOpen={showDate}
+  onDidDismiss={() => setShowDate(false)}
+  className="premium-date-modal"
+  backdropDismiss={true}
+>
+  <div className="modern-picker-header">
+    <button onClick={() => setShowDate(false)}>Cancel</button>
+    <h3>Select Date</h3>
+    <button onClick={() => setShowDate(false)}>Done</button>
+  </div>
 
-        {/* ── TIME MODAL ── */}
-        <IonModal isOpen={showTime} onDidDismiss={() => setShowTime(false)} keepContentsMounted={true}>
-          <div className="picker-header">
-            <span onClick={() => setShowTime(false)}>←</span>
-            <h3>Select Time</h3>
-          </div>
-          <IonDatetime
-            presentation="time"
-            onIonChange={(e) => {
-              const val = e.detail.value as string;
-              if (!val) return;
-              const timePart = val.includes('T') ? val.split('T')[1] : val;
-              const [hh, mm] = timePart.split(':');
-              setRawTime(`${hh}:${mm}`);
-              setTime(`${hh}:${mm}`);
-            }}
-          />
-          <div style={{ padding: '0 16px 32px' }}>
-            <button className="create-btn create-btn--active" onClick={() => setShowTime(false)}>Confirm</button>
-          </div>
-        </IonModal>
+<IonDatetime
+  presentation="date"
+  preferWheel={true}
+  showDefaultButtons={false}
+  min={new Date().toISOString().split('T')[0]}
+  value={rawDate}
+  onIonChange={(e) => {
+
+    const val = e.detail.value as string;
+
+    if (!val) return;
+
+    const datePart = val.split('T')[0];
+
+    const [yyyy, mm, dd] = datePart.split('-');
+
+    setRawDate(datePart);
+    setDate(`${dd}-${mm}-${yyyy}`);
+  }}
+/>
+</IonModal>
+
+
+<IonModal
+  isOpen={showTime}
+  onDidDismiss={() => setShowTime(false)}
+  className="premium-date-modal"
+  backdropDismiss={true}
+>
+  <div className="modern-picker-header">
+    <button onClick={() => setShowTime(false)}>Cancel</button>
+    <h3>Select Time</h3>
+    <button onClick={() => setShowTime(false)}>Done</button>
+  </div>
+
+ <IonDatetime
+  presentation="time"
+  preferWheel={true}
+  showDefaultButtons={false}
+  minuteValues="0,5,10,15,20,25,30,35,40,45,50,55"
+  value={rawTime}
+  min={
+    rawDate === new Date().toISOString().split('T')[0]
+      ? new Date().toISOString()
+      : undefined
+  }
+  onIonChange={(e) => {
+
+    const val = e.detail.value as string;
+
+    if (!val) return;
+
+    const timePart = val.includes('T')
+      ? val.split('T')[1]
+      : val;
+
+    const [hh, mm] = timePart.split(':');
+
+    const selectedTime = `${hh}:${mm}`;
+
+    // If selected date is today,
+    // block completed/past time
+    if (rawDate === new Date().toISOString().split('T')[0]) {
+
+      const now = new Date();
+
+      const currentHours = now.getHours();
+      const currentMinutes = now.getMinutes();
+
+      const selectedHours = parseInt(hh);
+      const selectedMinutes = parseInt(mm);
+
+      const currentTotal =
+        currentHours * 60 + currentMinutes;
+
+      const selectedTotal =
+        selectedHours * 60 + selectedMinutes;
+
+      // Prevent selecting elapsed time
+      if (selectedTotal <= currentTotal) {
+
+        // Optional:
+        // reset invalid selection
+        setRawTime('');
+        setTime('');
+
+        return;
+      }
+    }
+
+    setRawTime(selectedTime);
+    setTime(selectedTime);
+  }}
+/>
+</IonModal>
 
       </IonContent>
     </IonPage>
