@@ -298,6 +298,40 @@ const BidFlow: React.FC = () => {
     return () => clearInterval(waitTimerRef.current);
   }, [screen, !!waitingSecsLeft && waitingSecsLeft > 0]);
 
+  // 7b. round-results: when waitingSecsLeft hits 0, resume polling every 3s for next round opening
+  useEffect(() => {
+    if (screen !== 'round-results') return;
+    if (waitingSecsLeft === null || waitingSecsLeft > 0) return;
+    // Waiting countdown finished — aggressively poll until next round opens or event finishes
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await getRoundStatus(eventId);
+        if (res.event_status === 'finished' || res.round_status === 'finished') {
+          clearInterval(pollRef.current);
+          setScreen('payment-intro');
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          return;
+        }
+        if (res.round_status === 'open' && res.current_round > currentRound) {
+          clearInterval(pollRef.current);
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(d.round_number);
+            setRoundSecsLeft(d.seconds_left);
+          } catch (_) {
+            setCurrentRound(res.current_round);
+            setRoundSecsLeft(res.seconds_left);
+          }
+          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setScreen('bid-entry');
+        }
+      } catch (_) {}
+    }, 3000);
+    return () => clearInterval(pollRef.current);
+  }, [screen, waitingSecsLeft, eventId, currentRound, lastBidAmount]);
+
   // 8a. confirm-bid: poll every 5s to refresh group member bid statuses
   useEffect(() => {
     if (screen !== 'confirm-bid') return;
@@ -434,6 +468,13 @@ const BidFlow: React.FC = () => {
   const groupSize         = roundData?.group_size       ?? 4;
   const matchRatio        = roundData?.match_ratio      ?? '1:3';
 
+  // Actual number of members in this donor's group
+  const actualInGroup = (myGroup?.members?.length ?? 0) > 0
+    ? myGroup!.members.length
+    : roundBids.length > 0
+      ? roundBids.length
+      : groupSize;
+
   // Calculate matched amount live from round_bids when backend hasn't grouped yet
   const liveMinBid = roundBids.length > 0
     ? Math.min(...roundBids.map((b: any) => b.amount))
@@ -443,7 +484,7 @@ const BidFlow: React.FC = () => {
     : liveMinBid;
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
-    : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0);
+    : (matchedAmount > 0 && actualInGroup > 0 ? matchedAmount * actualInGroup : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0));
   const myCumulative = roundData?.my_cumulative ?? 0;
 
   // displayCumulative: backend my_cumulative already sums all closed rounds' min_amount
@@ -652,7 +693,7 @@ const BidFlow: React.FC = () => {
               <circle cx="8.5" cy="7" r="2.5" stroke="#2BA7A0" strokeWidth="1.5"/>
               <path d="M17 18v-1.5a3 3 0 00-2-2.8M14 4.2a3 3 0 010 5.6" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
-            <span className="bf-stat3-val">{roundBids.length > 0 ? roundBids.length : groupSize}</span><span className="bf-stat3-lbl">In Group</span>
+            <span className="bf-stat3-val">{actualInGroup}</span><span className="bf-stat3-lbl">In Group</span>
           </div>
           <div className="bf-stat3">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -957,9 +998,42 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
   </div>
 );
 
+const AVATAR_PAGE = 4;
+
 const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number }> = ({ myGroup, groupSize }) => {
   const members = myGroup?.members ?? [];
-  const slots = Array.from({ length: groupSize }, (_, i) => members[i] ?? null);
+  const slotCount = myGroup ? groupSize : Math.min(groupSize, 4);
+  const slots = Array.from({ length: slotCount }, (_, i) => members[i] ?? null);
+
+  // Split slots into pages of 4 for the slider
+  const pages: (typeof slots)[] = [];
+  for (let i = 0; i < slots.length; i += AVATAR_PAGE) {
+    pages.push(slots.slice(i, i + AVATAR_PAGE));
+  }
+  const needsSlider = slots.length > AVATAR_PAGE;
+
+  const renderAvatarCol = (m: any, i: number) => {
+    const isYou = m?.is_you ?? false;
+    const name  = isYou ? 'You' : (m?.pseudonym ?? '?');
+    const emoji = m?.emoji ?? null;
+    const initial = m?.initial ?? '?';
+    const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
+    return (
+      <div key={i} className={`bf-avatar-col ${isYou ? 'bf-avatar-box--you' : ''}`}>
+        <div className="bf-avatar-box">
+          {emoji ? <span className="bf-avatar-em">{emoji}</span>
+            : <span className="bf-avatar-em" style={{ fontSize:18, fontWeight:600 }}>{m ? initial : '—'}</span>}
+        </div>
+        <span className={`bf-avatar-name ${isYou ? 'bf-avatar-name--you' : ''}`}>{m ? name : '...'}</span>
+        <span className="bf-avatar-status">{m ? status : ''}</span>
+        <div className="bf-avatar-dots">
+          <span className={`bf-avatar-dot ${m ? 'bf-avatar-dot--on' : ''}`} />
+          <span className="bf-avatar-dot" /><span className="bf-avatar-dot" />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bf-group-card">
       <div className="bf-gc-top">
@@ -972,30 +1046,29 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
           <span className="bf-gc-name">{myGroup?.name ?? 'Your Group'}</span>
         </div>
       </div>
-      <p className="bf-gc-sub">You're matched with {groupSize - 1} other donors</p>
-      <div className="bf-avatars">
-        {slots.map((m, i) => {
-          const isYou = m?.is_you ?? false;
-          const name  = isYou ? 'You' : (m?.pseudonym ?? '?');
-          const emoji = m?.emoji ?? null;
-          const initial = m?.initial ?? '?';
-          const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
-          return (
-            <div key={i} className={`bf-avatar-col ${isYou ? 'bf-avatar-box--you' : ''}`}>
-              <div className="bf-avatar-box">
-                {emoji ? <span className="bf-avatar-em">{emoji}</span>
-                  : <span className="bf-avatar-em" style={{ fontSize:18, fontWeight:600 }}>{m ? initial : '—'}</span>}
+      {myGroup && <p className="bf-gc-sub">You're matched with {(myGroup.members?.length ?? groupSize) - 1} other donors</p>}
+      {!myGroup && <p className="bf-gc-sub">Waiting for group assignment...</p>}
+      {needsSlider ? (
+        <Swiper
+          modules={[Pagination]}
+          pagination={{ clickable: true }}
+          spaceBetween={0}
+          slidesPerView={1}
+          style={{ width: '100%', paddingBottom: 16 }}
+        >
+          {pages.map((page, pi) => (
+            <SwiperSlide key={pi}>
+              <div className="bf-avatars">
+                {page.map((m, i) => renderAvatarCol(m, pi * AVATAR_PAGE + i))}
               </div>
-              <span className={`bf-avatar-name ${isYou ? 'bf-avatar-name--you' : ''}`}>{m ? name : '...'}</span>
-              <span className="bf-avatar-status">{m ? status : ''}</span>
-              <div className="bf-avatar-dots">
-                <span className={`bf-avatar-dot ${m ? 'bf-avatar-dot--on' : ''}`} />
-                <span className="bf-avatar-dot" /><span className="bf-avatar-dot" />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            </SwiperSlide>
+          ))}
+        </Swiper>
+      ) : (
+        <div className="bf-avatars">
+          {slots.map((m, i) => renderAvatarCol(m, i))}
+        </div>
+      )}
     </div>
   );
 };

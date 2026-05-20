@@ -105,8 +105,10 @@ const ViewEvent: React.FC = () => {
 
   // ─── API state ────────────────────────────────────────────────────────────
   const [apiEvent, setApiEvent]   = useState<Event | null>(null);
-  const [timerSecs, setTimerSecs] = useState(0);
+  const [timerSecs, setTimerSecs]       = useState(0);   // bidding countdown
+  const [waitingSecs, setWaitingSecs]   = useState(0);   // waiting-period countdown
   const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitingRef                = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollRef                   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── Proposed Group Allocations (PGA) state ───────────────────────────────
@@ -125,10 +127,47 @@ const ViewEvent: React.FC = () => {
   const eventId = new URLSearchParams(location.search).get('id');
 
   const seedCountdown = (data: Event) => {
-    const roundTimeSecs = (data as any).round_time ?? 0;
-    const elapsed       = data.current_round_timer?.seconds ?? 0;
-    const remaining     = Math.max(0, roundTimeSecs - elapsed);
-    setTimerSecs(remaining);
+    const biddingSecs  = (data as any).duration   ?? 0;  // bidding window
+    const waitingTotal = (data as any).round_time  ?? 0;  // waiting/buffer window
+    const elapsed      = data.current_round_timer?.seconds ?? 0;
+
+    // Clear both running intervals before reseeding
+    if (timerRef.current)   { clearInterval(timerRef.current);   timerRef.current   = null; }
+    if (waitingRef.current) { clearInterval(waitingRef.current); waitingRef.current = null; }
+
+    if (elapsed < biddingSecs) {
+      // Still in bidding window
+      const bidRemaining = Math.max(0, biddingSecs - elapsed);
+      setTimerSecs(bidRemaining);
+      setWaitingSecs(0);
+      if (bidRemaining > 0) {
+        timerRef.current = setInterval(() => {
+          setTimerSecs(s => {
+            if (s <= 1) {
+              // Bidding done — start waiting countdown
+              clearInterval(timerRef.current!); timerRef.current = null;
+              setWaitingSecs(waitingTotal);
+              if (waitingTotal > 0) {
+                waitingRef.current = setInterval(() =>
+                  setWaitingSecs(w => Math.max(0, w - 1)), 1000);
+              }
+              return 0;
+            }
+            return s - 1;
+          });
+        }, 1000);
+      }
+    } else {
+      // In waiting window
+      const waitElapsed  = elapsed - biddingSecs;
+      const waitRemaining = Math.max(0, waitingTotal - waitElapsed);
+      setTimerSecs(0);
+      setWaitingSecs(waitRemaining);
+      if (waitRemaining > 0) {
+        waitingRef.current = setInterval(() =>
+          setWaitingSecs(w => Math.max(0, w - 1)), 1000);
+      }
+    }
   };
 
   const refreshEvent = async () => {
@@ -153,12 +192,14 @@ const ViewEvent: React.FC = () => {
     });
   }, [location.search]);
 
-  // ─── Live countdown timer ─────────────────────────────────────────────────
+  // ─── Cleanup timers on unmount ───────────────────────────────────────────
+  // seedCountdown() owns both interval lifecycles; clean up on unmount.
   useEffect(() => {
-    if (apiEvent?.status !== 'live') return;
-    timerRef.current = setInterval(() => setTimerSecs(s => Math.max(0, s - 1)), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [apiEvent?.status]);
+    return () => {
+      if (timerRef.current)   clearInterval(timerRef.current);
+      if (waitingRef.current) clearInterval(waitingRef.current);
+    };
+  }, []);
 
   // ─── Auto-refresh polling (live events only) ──────────────────────────────
   // Polls every 5 s so donors, bids, and group changes appear without a manual refresh.
@@ -272,13 +313,14 @@ const ViewEvent: React.FC = () => {
   const hasOpenRound = !!openRound;
   const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
 
-  // Show "Proposed Group Allocations" button when a round just closed
-  // (live event, no open round, at least one closed round, not all rounds done)
-  const hasClosedRound  = rounds.some(r => r.status === 'complete');
-  const roundJustClosed = !hasOpenRound &&
-    hasClosedRound &&
-    !allRoundsDone &&
-    apiEvent?.status === 'live';
+  // Show "Proposed Group Allocations" button:
+  // (a) backend confirmed round closed: no open round + at least one complete
+  // (b) waiting period is active: bidding timer hit 0 and waiting countdown is running
+  const hasClosedRound   = rounds.some(r => r.status === 'complete');
+  const inWaitingPeriod  = hasOpenRound && timerSecs === 0 && waitingSecs > 0;
+  const roundJustClosed  = (
+    (!hasOpenRound && hasClosedRound && !allRoundsDone) || inWaitingPeriod
+  ) && apiEvent?.status === 'live';
 
   // ─── Build PgaGroup[] from API current_groups ────────────────────────────
   const buildPgaGroups = (apiGroups: ApiGroup[]): PgaGroup[] =>
@@ -297,11 +339,29 @@ const ViewEvent: React.FC = () => {
       })),
     }));
 
-  const openPGA = () => {
-    const lastRound = rounds.find(r => r.status === 'complete');
-    setPgaRoundId(lastRound?.id ?? null);
-    setPgaGroups(apiEvent?.current_groups?.length ? buildPgaGroups(apiEvent.current_groups) : []);
+  const openPGA = async () => {
     setShowPGA(true);
+    if (!eventId) return;
+    const freshData = await getEvent(Number(eventId));
+    setApiEvent(freshData);
+    const lastRound = (freshData.rounds_overview ?? []).find((r: ApiRound) => r.status === 'closed');
+    setPgaRoundId(lastRound?.id ?? null);
+
+    // current_groups holds the last-closed-round's groups (populated by GroupingService).
+    // If empty, fall back to last_round_groups (future backend field).
+    // Log to help diagnose if neither is populated.
+    const groupSource =
+      freshData.current_groups?.length     ? freshData.current_groups :
+      (freshData as any).last_round_groups?.length ? (freshData as any).last_round_groups :
+      [];
+
+    if (!groupSource.length) {
+      console.warn('[PGA] No groups found. current_groups:', freshData.current_groups,
+        '| last_round_groups:', (freshData as any).last_round_groups,
+        '| Full response:', freshData);
+    }
+
+    setPgaGroups(groupSource.length ? buildPgaGroups(groupSource) : []);
   };
 
   // ─── PGA interactions ─────────────────────────────────────────────────────
@@ -645,7 +705,7 @@ const ViewEvent: React.FC = () => {
                   <path d="M6 9.3335H2.66667C2.29848 9.3335 2 9.63197 2 10.0002V13.3335C2 13.7017 2.29848 14.0002 2.66667 14.0002H6C6.36819 14.0002 6.66667 13.7017 6.66667 13.3335V10.0002C6.66667 9.63197 6.36819 9.3335 6 9.3335Z" stroke="#6B7280" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
                 <span className="ve-round-title">Round {currentRoundNum}</span>
-                {hasOpenRound && (
+                {hasOpenRound && timerSecs > 0 && (
                   <div className="ve-round-timer" style={{ background: '#FFF3E6', color: '#FCB040' }}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                       <path d="M6.66699 1.3335H9.33366" stroke="#FCB040" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -655,7 +715,17 @@ const ViewEvent: React.FC = () => {
                     {formatTimer(timerSecs)}
                   </div>
                 )}
-                <span className="ve-round-complete">{hasOpenRound ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>
+                {inWaitingPeriod && (
+                  <div className="ve-round-timer" style={{ background: '#E6F4F2', color: '#2BA7A0' }}>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M6.66699 1.3335H9.33366" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8 9.3335L10 7.3335" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#2BA7A0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {formatTimer(waitingSecs)}
+                  </div>
+                )}
+                <span className="ve-round-complete">{(hasOpenRound && timerSecs > 0) ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>
               </div>
 
               {groups.length > 0 ? (
