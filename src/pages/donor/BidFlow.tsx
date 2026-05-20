@@ -390,6 +390,7 @@ const BidFlow: React.FC = () => {
 
   const handlePlaceBid = async () => {
     if (submitting) return;
+    if (roundSecsLeft !== null && roundSecsLeft <= 0) { setSubmitError('Round has ended. Bidding is closed.'); return; }
     setSubmitError('');
     if (!bidAmount || bidAmount <= 0) { setSubmitError('Please enter a bid amount.'); return; }
     if (lastBidAmount > 0 && bidAmount < lastBidAmount) { setSubmitError(`Bid must be at least £${lastBidAmount} (your previous bid).`); return; }
@@ -442,16 +443,17 @@ const BidFlow: React.FC = () => {
     : liveMinBid;
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
-    : liveMinBid * groupSize;
+    : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0);
   const myCumulative = roundData?.my_cumulative ?? 0;
 
   // displayCumulative: backend my_cumulative already sums all closed rounds' min_amount
   // plus live min bid for current open round (handled in calcCumulative on backend)
   const displayCumulative = myCumulative;
 
-  // Payment total: always use server value — fetch via getPaymentSummary when event finishes
-  const paymentTotal = paymentData?.total_amount
-    ?? (paymentData?.rounds_detail?.reduce((s: number, r: any) => s + r.matched, 0) || displayCumulative);
+  // Payment total: sum per-donor matched amounts from rounds_detail (each donor gets their own)
+  const paymentTotal = paymentData?.rounds_detail?.reduce((s: number, r: any) => s + (r.matched ?? 0), 0)
+    ?? paymentData?.total_amount
+    ?? 0;
 
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
@@ -544,9 +546,15 @@ const BidFlow: React.FC = () => {
         </div>
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', marginBottom:8 }}>{submitError}</p>}
         <div className="bf-cta-wrap">
-          <button className="bf-orange-btn" onClick={() => setScreen('confirm-bid')}>
-            <BoltIcon /> Place Your Bid
-          </button>
+          {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
+            <div style={{ textAlign:'center', padding:'16px 0', color:'#9AA0A6', fontSize:14, fontWeight:500 }}>
+              ⏱ Round time has ended — bidding is now closed.
+            </div>
+          ) : (
+            <button className="bf-orange-btn" onClick={() => setScreen('confirm-bid')}>
+              <BoltIcon /> Place Your Bid
+            </button>
+          )}
         </div>
       </div>
     </IonContent></IonPage>
@@ -590,9 +598,15 @@ const BidFlow: React.FC = () => {
         <p className="bf-update-note">You can update your bid anytime<br/>until another user places theirs.</p>
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', marginBottom:8 }}>{submitError}</p>}
         <div className="bf-cta-wrap bf-cta-wrap--bottom">
-          <button className="bf-orange-btn" onClick={handlePlaceBid} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
-            <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${bidAmount}`}
-          </button>
+          {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
+            <div style={{ textAlign:'center', padding:'16px 0', color:'#9AA0A6', fontSize:14, fontWeight:500 }}>
+              ⏱ Round time has ended — bidding is now closed.
+            </div>
+          ) : (
+            <button className="bf-orange-btn" onClick={handlePlaceBid} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
+              <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${bidAmount}`}
+            </button>
+          )}
         </div>
       </div>
     </IonContent></IonPage>

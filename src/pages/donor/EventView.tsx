@@ -90,7 +90,18 @@ const EventView: React.FC = () => {
     if (isActive || seconds <= 0) return;
     const timer = setInterval(() => {
       setSeconds(prev => {
-        if (prev <= 1) { clearInterval(timer); setIsActive(true); return 0; }
+        if (prev <= 1) {
+          clearInterval(timer);
+          setIsActive(true);
+          // Re-fetch so event.status reflects 'live' from backend
+          if (eventId) {
+            (isLoggedIn
+              ? getDonorEventDetail(eventId)
+              : Promise.resolve(null)
+            ).then(data => { if (data) setEvent(data); }).catch(() => {});
+          }
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);

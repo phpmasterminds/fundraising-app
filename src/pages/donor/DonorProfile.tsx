@@ -7,7 +7,7 @@ import { useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import './DonorProfile.css';
 import DonorHeader from '../../components/DonorHeader';
-import { joinEvent } from '../../services/donorEvents';
+import { joinEvent, getDonorEventDetail } from '../../services/donorEvents';
 import { updateProfile, changePassword } from '../../services/profileService';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
 
@@ -84,6 +84,16 @@ const DonorProfile: React.FC = () => {
 
       if (isJoin) {
         const eventId = Number(localStorage.getItem('event_id'));
+
+        // Check event is still live before joining
+        if (eventId) {
+          const eventData = await getDonorEventDetail(eventId);
+          if (eventData.status !== 'live') {
+            setSaveError('This event is not live yet. Please wait for the host to start it.');
+            setSaving(false);
+            return;
+          }
+        }
         if (eventId && displayName.trim()) {
           try {
             const code = localStorage.getItem('event_code') ?? '';
@@ -144,7 +154,7 @@ const DonorProfile: React.FC = () => {
 
   return (
     <IonPage>
-      <IonContent fullscreen scrollY={false} className="profile-page">
+      <IonContent fullscreen className="profile-page">
 
         <div className="container">
 
