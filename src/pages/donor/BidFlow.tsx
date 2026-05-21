@@ -97,16 +97,36 @@ const BidFlow: React.FC = () => {
 
   /* ══════ EFFECTS ══════ */
 
+  // 0. Reset ALL per-event state when navigating to a different event (browser back → new event)
+  useEffect(() => {
+    // Clear every piece of state that is seeded from the previous event
+    setScreen('starting');
+    setChecking(true);
+    setBidAmount(0);
+    setInputVal('0');
+    setSubmitError('');
+    setCurrentRound(1);
+    setRoundData(null);
+    setGroupBidsOpen(false);
+    setRoundSecsLeft(null);
+    setWaitingSecsLeft(null);
+    setRoundCloseSecsLeft(null);
+    setPaymentData(null);
+    setHasPaid(false);
+    // Kill any running timers/polls from the old event
+    clearInterval(roundTimerRef.current);
+    clearInterval(waitTimerRef.current);
+    clearInterval(pollRef.current);
+    // Re-seed lastBidAmount from localStorage for this specific event
+    const saved = localStorage.getItem(`peerfund_lastbid_${stateEventId}`);
+    const n = saved ? parseInt(saved, 10) : 0;
+    setLastBidAmountState(n);
+    if (n > 0) { setBidAmount(n); setInputVal(String(n)); }
+  }, [stateEventId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 1. Fetch event meta on mount + check if event already finished
   useEffect(() => {
     if (!stateEventId) return;
-
-    // Pre-fill bid with last saved amount if available
-    const saved = localStorage.getItem(`peerfund_lastbid_${stateEventId}`);
-    if (saved) {
-      const n = parseInt(saved, 10);
-      if (n > 0) { setBidAmount(n); setInputVal(String(n)); }
-    }
 
     // Always check round status first to handle finished events immediately
     getRoundStatus(stateEventId).then(res => {
@@ -184,12 +204,37 @@ const BidFlow: React.FC = () => {
     clearInterval(roundTimerRef.current);
     roundTimerRef.current = setInterval(() => {
       setRoundSecsLeft(t => {
-        if (!t || t <= 1) { clearInterval(roundTimerRef.current); return 0; }
+        if (!t || t <= 1) {
+          clearInterval(roundTimerRef.current);
+          // Timer hit 0 — immediately ask server what happened
+          getRoundStatus(eventId).then(res => {
+            if (res.payment_status === 'paid') {
+              getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+              setScreen('receipt');
+            } else if (res.event_status === 'finished' || res.round_status === 'finished') {
+              getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+              setScreen('payment-intro');
+            } else if (res.round_status === 'closed' || res.round_status === 'grouping') {
+              // Round just closed — move to results
+              getCurrentRound(eventId).then(d => {
+                setRoundData(d);
+                setCurrentRound(prev => Math.max(prev, d.round_number));
+                if (d.seconds_left !== null && d.seconds_left > 0) setRoundCloseSecsLeft(d.seconds_left);
+                setGroupBidsOpen(false);
+                setScreen('round-results');
+              }).catch(() => setScreen('round-results'));
+            }
+            // If still 'open', stay put — the UI already shows 00:00 which is accurate
+          }).catch(() => {
+            // Network error — gracefully fall through; polling will catch it
+          });
+          return 0;
+        }
         return t - 1;
       });
     }, 1000);
     return () => clearInterval(roundTimerRef.current);
-  }, [screen, !!roundSecsLeft && roundSecsLeft > 0]);
+  }, [screen, !!roundSecsLeft && roundSecsLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5. submitted → fetch results → round-results
   useEffect(() => {
@@ -499,19 +544,25 @@ const BidFlow: React.FC = () => {
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh' }}>
-        <p style={{ color:'#9AA0A6', fontSize:14 }}>Loading event...</p>
+      <div className="bf-loading-screen">
+        <div className="bf-loading-icon-wrap">
+          <div className="bf-loading-spin" />
+          <img src="/assets/img/logo.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+        </div>
+        <span className="bf-loading-label">PeerFund</span>
       </div>
     </IonContent></IonPage>
   );
 
-  // Show nothing while checking event status (prevents flash of bid screen for finished events)
+  // Show branded loading while checking event status (prevents flash of bid screen for finished events)
   if (checking) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh' }}>
-        <div style={{ textAlign:'center' }}>
-          <p style={{ color:'#9AA0A6', fontSize:14 }}>Loading...</p>
+      <div className="bf-loading-screen">
+        <div className="bf-loading-icon-wrap">
+          <div className="bf-loading-spin" />
+          <img src="/assets/icon/icon.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
+        <span className="bf-loading-label">PeerFund</span>
       </div>
     </IonContent></IonPage>
   );

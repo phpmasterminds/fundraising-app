@@ -122,14 +122,18 @@ const ViewEvent: React.FC = () => {
   }>({ open: false, fromGroupId: null, selectedMemberIds: [] });
   const [pgaMoveLoading, setPgaMoveLoading] = useState(false);
   const [pgaToast, setPgaToast]         = useState<string | null>(null);
+  const [pgaLaunched, setPgaLaunched]   = useState(false);
   const moveSheetRef                    = useRef<HTMLDivElement>(null);
 
   const eventId = new URLSearchParams(location.search).get('id');
 
   const seedCountdown = (data: Event) => {
-    const biddingSecs  = (data as any).duration   ?? 0;  // bidding window
-    const waitingTotal = (data as any).round_time  ?? 0;  // waiting/buffer window
-    const elapsed      = data.current_round_timer?.seconds ?? 0;
+    const timer        = data.current_round_timer as any;
+    // duration & round_time may live at top level OR inside current_round_timer
+    const biddingSecs  = (data as any).duration  ?? timer?.duration  ?? 0;
+    const waitingTotal = (data as any).round_time ?? timer?.round_time ?? 0;
+    const elapsed      = timer?.seconds ?? 0;
+    console.log('[seedCountdown]', { biddingSecs, waitingTotal, elapsed, timer, topLevel_duration: (data as any).duration, topLevel_round_time: (data as any).round_time });
 
     // Clear both running intervals before reseeding
     if (timerRef.current)   { clearInterval(timerRef.current);   timerRef.current   = null; }
@@ -313,6 +317,11 @@ const ViewEvent: React.FC = () => {
   const hasOpenRound = !!openRound;
   const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
 
+  // Reset pgaLaunched once a new round is actually open
+  useEffect(() => {
+    if (hasOpenRound) setPgaLaunched(false);
+  }, [hasOpenRound]);
+
   // Show "Proposed Group Allocations" button:
   // (a) backend confirmed round closed: no open round + at least one complete
   // (b) waiting period is active: bidding timer hit 0 and waiting countdown is running
@@ -320,7 +329,7 @@ const ViewEvent: React.FC = () => {
   const inWaitingPeriod  = hasOpenRound && timerSecs === 0 && waitingSecs > 0;
   const roundJustClosed  = (
     (!hasOpenRound && hasClosedRound && !allRoundsDone) || inWaitingPeriod
-  ) && apiEvent?.status === 'live';
+  ) && apiEvent?.status === 'live' && !pgaLaunched;
 
   // ─── Build PgaGroup[] from API current_groups ────────────────────────────
   const buildPgaGroups = (apiGroups: ApiGroup[]): PgaGroup[] =>
@@ -451,6 +460,7 @@ const ViewEvent: React.FC = () => {
       await startRound(Number(eventId));
       await refreshEvent();
       setShowPGA(false);
+      setPgaLaunched(true);
     } catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
@@ -777,7 +787,7 @@ const ViewEvent: React.FC = () => {
           {/* ── NEW: After round closes — show Proposed Group Allocations button ── */}
           {roundJustClosed && (
             <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={openPGA}>
-              Proposed Group Allocations →
+              Proposed Group Allocations →{inWaitingPeriod && waitingSecs > 0 ? ` (${formatTimer(waitingSecs)})` : ''}
             </div>
           )}
 
@@ -790,7 +800,7 @@ const ViewEvent: React.FC = () => {
           {apiEvent?.status === 'live' && hasOpenRound && (
             <div className="ve-call-time-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={handleEndRound}>
               <span className="ve-call-time-icon">■</span>
-              {actionLoading ? 'Ending…' : 'Call Time (End Round)'}
+              {actionLoading ? 'Ending…' : timerSecs > 0 ? `Call Time (${formatTimer(timerSecs)})` : 'Call Time (End Round)'}
             </div>
           )}
 
