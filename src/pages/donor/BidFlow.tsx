@@ -197,6 +197,80 @@ const BidFlow: React.FC = () => {
     });
   }, [screen, eventId]);
 
+  // 3b. Poll every 5s on bid screens — detects host ending round early OR host opening next round
+  useEffect(() => {
+    if (screen !== 'bid-entry' && screen !== 'confirm-bid') return;
+    if (!eventId) return;
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await getRoundStatus(eventId);
+
+        // Host finished the whole event
+        if (res.payment_status === 'paid') {
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          setScreen('receipt');
+          return;
+        }
+        if (res.event_status === 'finished' || res.round_status === 'finished') {
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          setScreen('payment-intro');
+          return;
+        }
+
+        // Host ended the current round early (closed / grouping)
+        if (res.round_status === 'closed' || res.round_status === 'grouping') {
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          setRoundSecsLeft(0); // stop the round timer display
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+            if (d.seconds_left !== null && d.seconds_left > 0) setRoundCloseSecsLeft(d.seconds_left);
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
+          return;
+        }
+
+        // Host opened the NEXT round while donor is still on bid screens (edge case)
+        if (res.round_status === 'open' && res.current_round > currentRound) {
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(d.round_number);
+            setRoundSecsLeft(d.seconds_left);
+          } catch (_) {
+            setCurrentRound(res.current_round);
+            setRoundSecsLeft(res.seconds_left);
+          }
+          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setScreen('bid-entry');
+          return;
+        }
+
+        // Host enabled the waiting period between rounds
+        if (res.round_status === 'waiting') {
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          setRoundSecsLeft(0); // stop the round timer
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(res.seconds_until_next);
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
+        }
+      } catch (_) {}
+    }, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [screen, eventId, currentRound, lastBidAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 4. Round countdown (ticks once seeded from server)
   useEffect(() => {
     if (screen !== 'bid-entry' && screen !== 'confirm-bid') return;
@@ -277,7 +351,7 @@ const BidFlow: React.FC = () => {
       try {
         const res = await getRoundStatus(eventId);
 
-        // Event finished → payment screen
+        // Event finished → payment screen (always check this first, including last round)
         if (res.round_status === 'finished' || res.event_status === 'finished') {
           clearInterval(pollRef.current);
           setScreen('payment-intro');
@@ -285,21 +359,7 @@ const BidFlow: React.FC = () => {
           return;
         }
 
-        // Last round just closed → event should be finishing soon
-        // Keep polling until event_status = finished
-        if (currentRound >= totalRounds) return;
-
-        // Always re-fetch round data so matched_amount / group_total update live
-        try {
-          const d = await getCurrentRound(eventId);
-          setRoundData(d);
-          // Keep round-close timer in sync with server
-          if (d.seconds_left !== null && d.seconds_left > 0 && roundCloseSecsLeft === null) {
-            setRoundCloseSecsLeft(d.seconds_left);
-          }
-        } catch (_) {}
-
-        // Next round opened (not last round)
+        // Next round opened → transition donor to bid-entry
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
           try {
@@ -311,23 +371,43 @@ const BidFlow: React.FC = () => {
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
-          // Pre-fill last bid amount as minimum for next round
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('bid-entry');
           return;
         }
 
-        // Between rounds — stay on round-results, just update waiting timer
+        // Last round closed → keep polling for finished, don't fetch round data (would overwrite results)
+        if (currentRound >= totalRounds) return;
+
+        // Between rounds (waiting) — seed waiting timer, do NOT call getCurrentRound
+        // (getCurrentRound returns next round with nulls, which would wipe the results display)
         if (res.round_status === 'waiting') {
-          clearInterval(pollRef.current);
           setRoundCloseSecsLeft(null);
-          setWaitingSecsLeft(res.seconds_until_next);
-          // Stay on round-results screen — pill bar will show countdown
+          // Seed waiting timer from server only on first poll (local tick handles decrement)
+          if (res.seconds_until_next !== null && res.seconds_until_next !== undefined) {
+            setWaitingSecsLeft(prev => (prev === null || prev <= 0) ? res.seconds_until_next : prev);
+          }
+          // Keep polling — do NOT clearInterval, so we catch host launching next round mid-countdown
+          return;
+        }
+
+        // Round closed/grouping — re-fetch to get matched_amount once grouping completes
+        if (res.round_status === 'closed' || res.round_status === 'grouping') {
+          try {
+            const d = await getCurrentRound(eventId);
+            // Only update if backend now has real matched_amount (grouping done)
+            if (d.matched_amount !== null && d.matched_amount !== undefined) {
+              setRoundData(d);
+            }
+            if (d.seconds_left !== null && d.seconds_left > 0 && roundCloseSecsLeft === null) {
+              setRoundCloseSecsLeft(d.seconds_left);
+            }
+          } catch (_) {}
         }
       } catch (_) {}
     }, 3000);
     return () => clearInterval(pollRef.current);
-  }, [screen, eventId, currentRound, totalRounds, lastBidAmount, roundCloseSecsLeft]);
+  }, [screen, eventId, currentRound, totalRounds, lastBidAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 7. waiting: tick countdown (seeded from server seconds_until_next) — runs on round-results screen now
   useEffect(() => {
@@ -343,11 +423,14 @@ const BidFlow: React.FC = () => {
     return () => clearInterval(waitTimerRef.current);
   }, [screen, !!waitingSecsLeft && waitingSecsLeft > 0]);
 
-  // 7b. round-results: when waitingSecsLeft hits 0, resume polling every 3s for next round opening
+  // 7b. round-results: when waitingSecsLeft hits 0 OR is null on last round,
+  //     resume polling every 3s for next round opening or event finishing
   useEffect(() => {
     if (screen !== 'round-results') return;
-    if (waitingSecsLeft === null || waitingSecsLeft > 0) return;
-    // Waiting countdown finished — aggressively poll until next round opens or event finishes
+    // Fire when: waiting countdown finished (=== 0), OR last round with no waiting period (=== null)
+    if (waitingSecsLeft !== null && waitingSecsLeft !== 0) return;
+    if (waitingSecsLeft === null && currentRound < totalRounds) return; // not last round yet, Effect 6 handles it
+    // Aggressive poll until next round opens or event finishes
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -375,7 +458,7 @@ const BidFlow: React.FC = () => {
       } catch (_) {}
     }, 3000);
     return () => clearInterval(pollRef.current);
-  }, [screen, waitingSecsLeft, eventId, currentRound, lastBidAmount]);
+  }, [screen, waitingSecsLeft, eventId, currentRound, totalRounds, lastBidAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 8a. confirm-bid: poll every 5s to refresh group member bid statuses
   useEffect(() => {
@@ -507,11 +590,20 @@ const BidFlow: React.FC = () => {
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
   const isLastRound       = currentRound >= totalRounds;
-  const roundBids         = roundData?.round_bids      ?? [];
-  const myBid             = roundData?.my_bid          ?? bidAmount;
-  const myGroup           = roundData?.my_group        ?? null;
-  const groupSize         = roundData?.group_size       ?? 4;
-  const matchRatio        = roundData?.match_ratio      ?? '1:3';
+  // When backend returns the NEXT round during 'waiting' status, all current-round fields are null.
+  // Fall back to all_round_bids for the just-completed round (currentRound) to keep results visible.
+  const isWaitingStatus   = roundData?.status === 'waiting';
+  const completedRoundBid = isWaitingStatus
+    ? (roundData?.all_round_bids ?? []).find((r: any) => r.round_number === currentRound)
+    : null;
+
+  const roundBids  = roundData?.round_bids ?? [];
+  const myBid      = isWaitingStatus && completedRoundBid
+    ? completedRoundBid.amount
+    : (roundData?.my_bid ?? bidAmount);
+  const myGroup    = roundData?.my_group  ?? null;
+  const groupSize  = roundData?.group_size ?? 4;
+  const matchRatio = roundData?.match_ratio ?? '1:3';
 
   // Actual number of members in this donor's group
   const actualInGroup = (myGroup?.members?.length ?? 0) > 0
@@ -520,13 +612,16 @@ const BidFlow: React.FC = () => {
       ? roundBids.length
       : groupSize;
 
-  // Calculate matched amount live from round_bids when backend hasn't grouped yet
+  // Calculate matched amount live from round_bids when backend hasn't grouped yet.
+  // During waiting: backend returns next round data with nulls — use completed round's bid amount.
   const liveMinBid = roundBids.length > 0
     ? Math.min(...roundBids.map((b: any) => b.amount))
     : 0;
   const matchedAmount = roundData?.matched_amount !== null && roundData?.matched_amount !== undefined
     ? roundData.matched_amount
-    : liveMinBid;
+    : isWaitingStatus && completedRoundBid
+      ? completedRoundBid.amount  // best we have: donor's own bid for that round
+      : liveMinBid;
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
     : (matchedAmount > 0 && actualInGroup > 0 ? matchedAmount * actualInGroup : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0));
