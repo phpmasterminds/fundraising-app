@@ -624,7 +624,7 @@ const BidFlow: React.FC = () => {
       : liveMinBid;
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
-    : (matchedAmount > 0 && actualInGroup > 0 ? matchedAmount * actualInGroup : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0));
+    : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0);
   const myCumulative = roundData?.my_cumulative ?? 0;
 
   // displayCumulative: backend my_cumulative already sums all closed rounds' min_amount
