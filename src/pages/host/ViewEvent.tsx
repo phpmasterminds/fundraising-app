@@ -16,6 +16,8 @@ import {
   endRound,
   moveGroupMembers,
   rebalanceGroups,
+  deleteGroupMembers,
+  createGroup,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow } from '../../services/events';
 
@@ -110,6 +112,7 @@ const ViewEvent: React.FC = () => {
   const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
   const waitingRef                = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollRef                   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [roundEnding, setRoundEnding] = useState(false); // timer hit 0, polling 2s until backend confirms closed
 
   // ─── Proposed Group Allocations (PGA) state ───────────────────────────────
   const [showPGA, setShowPGA]           = useState(false);
@@ -123,54 +126,60 @@ const ViewEvent: React.FC = () => {
   const [pgaMoveLoading, setPgaMoveLoading] = useState(false);
   const [pgaToast, setPgaToast]         = useState<string | null>(null);
   const [pgaLaunched, setPgaLaunched]   = useState(false);
+  const [pgaActionSheet, setPgaActionSheet] = useState<{
+    open: boolean;
+    fromGroupId: number | null;
+    selectedMemberIds: number[];
+  }>({ open: false, fromGroupId: null, selectedMemberIds: [] });
+  const [pgaDeleteLoading, setPgaDeleteLoading] = useState(false);
+  const [pgaCreateLoading, setPgaCreateLoading] = useState(false);
   const moveSheetRef                    = useRef<HTMLDivElement>(null);
 
   const eventId = new URLSearchParams(location.search).get('id');
 
+  // Parse "HH:MM:SS" or "MM:SS" duration strings into total seconds
+  const parseDurationToSecs = (val: any): number => {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string' && val.includes(':')) {
+      const parts = val.split(':').map(Number);
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+    }
+    return Number(val) || 0;
+  };
+
   const seedCountdown = (data: Event) => {
-    const timer        = data.current_round_timer as any;
-    // duration & round_time may live at top level OR inside current_round_timer
-    const biddingSecs  = (data as any).duration  ?? timer?.duration  ?? 0;
-    const waitingTotal = (data as any).round_time ?? timer?.round_time ?? 0;
-    const elapsed      = timer?.seconds ?? 0;
-    console.log('[seedCountdown]', { biddingSecs, waitingTotal, elapsed, timer, topLevel_duration: (data as any).duration, topLevel_round_time: (data as any).round_time });
+    const timer = data.current_round_timer as any;
+
+    // Use backend-calculated remaining seconds — backend is the source of truth
+    // seconds_left = bidding time remaining for the open round
+    // waiting_seconds_left = PGA waiting period remaining after round closes
+    const biddingSecsLeft = (data as any).seconds_left ?? 0;
+    const waitingSecsLeft = (data as any).waiting_seconds_left ?? 0;
+
+    console.log('[seedCountdown]', { biddingSecsLeft, waitingSecsLeft, timer });
 
     // Clear both running intervals before reseeding
     if (timerRef.current)   { clearInterval(timerRef.current);   timerRef.current   = null; }
     if (waitingRef.current) { clearInterval(waitingRef.current); waitingRef.current = null; }
 
-    if (elapsed < biddingSecs) {
-      // Still in bidding window
-      const bidRemaining = Math.max(0, biddingSecs - elapsed);
-      setTimerSecs(bidRemaining);
+    if (biddingSecsLeft > 0) {
+      // Round is open — show bidding countdown on Call Time button
+      setTimerSecs(biddingSecsLeft);
       setWaitingSecs(0);
-      if (bidRemaining > 0) {
-        timerRef.current = setInterval(() => {
-          setTimerSecs(s => {
-            if (s <= 1) {
-              // Bidding done — start waiting countdown
-              clearInterval(timerRef.current!); timerRef.current = null;
-              setWaitingSecs(waitingTotal);
-              if (waitingTotal > 0) {
-                waitingRef.current = setInterval(() =>
-                  setWaitingSecs(w => Math.max(0, w - 1)), 1000);
-              }
-              return 0;
-            }
-            return s - 1;
-          });
-        }, 1000);
-      }
-    } else {
-      // In waiting window
-      const waitElapsed  = elapsed - biddingSecs;
-      const waitRemaining = Math.max(0, waitingTotal - waitElapsed);
+      timerRef.current = setInterval(() => {
+        setTimerSecs(s => Math.max(0, s - 1));
+      }, 1000);
+    } else if (waitingSecsLeft > 0) {
+      // Round closed — show waiting countdown on PGA button
       setTimerSecs(0);
-      setWaitingSecs(waitRemaining);
-      if (waitRemaining > 0) {
-        waitingRef.current = setInterval(() =>
-          setWaitingSecs(w => Math.max(0, w - 1)), 1000);
-      }
+      setWaitingSecs(waitingSecsLeft);
+      waitingRef.current = setInterval(() => {
+        setWaitingSecs(w => Math.max(0, w - 1));
+      }, 1000);
+    } else {
+      setTimerSecs(0);
+      setWaitingSecs(0);
     }
   };
 
@@ -178,7 +187,7 @@ const ViewEvent: React.FC = () => {
     if (!eventId) return;
     const data = await getEvent(Number(eventId));
     setApiEvent(data);
-    if (data.current_round_timer != null) {
+    if ((data as any).seconds_left != null || (data as any).waiting_seconds_left != null) {
       seedCountdown(data);
     }
   };
@@ -190,7 +199,7 @@ const ViewEvent: React.FC = () => {
       setEditName(data.name ?? '');
       setEditCharityName(data.charity_name ?? '');
       setEditTargetAmount(String(data.target_amount ?? ''));
-      if (data.current_round_timer != null) {
+      if ((data as any).seconds_left != null || (data as any).waiting_seconds_left != null) {
         seedCountdown(data);
       }
     });
@@ -206,16 +215,19 @@ const ViewEvent: React.FC = () => {
   }, []);
 
   // ─── Auto-refresh polling (live events only) ──────────────────────────────
-  // Polls every 5 s so donors, bids, and group changes appear without a manual refresh.
+  // Normal: polls every 5s. When timer hits 0 (roundEnding=true): polls every 2s
+  // until backend confirms round is closed, then drops back to 5s.
   useEffect(() => {
     if (apiEvent?.status !== 'live') {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       return;
     }
-    pollRef.current = setInterval(() => { refreshEvent(); }, 5000);
+    const interval = roundEnding ? 2000 : 5000;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    pollRef.current = setInterval(() => { refreshEvent(); }, interval);
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiEvent?.status, eventId]);
+  }, [apiEvent?.status, eventId, roundEnding]);
 
   const formatTimer = (secs: number) => {
     const m = String(Math.floor(secs / 60)).padStart(2, '0');
@@ -305,30 +317,49 @@ const ViewEvent: React.FC = () => {
   const targetAmount    = Number(apiEvent?.target_amount ?? 0);
   const progressPercent = targetAmount > 0 ? Math.min(100, Math.round((totalRaised / targetAmount) * 100)) : 0;
 
-  // When between rounds, fall back to completed_rounds so the round section still renders
-  const currentRoundNum = apiEvent?.current_round_number ?? apiEvent?.completed_rounds ?? 0;
+  // Must be declared before currentRoundNum which depends on it
+  const openRound    = rounds.find(r => r.status === 'bidding');
+  const hasOpenRound = !!openRound;
   const totalRoundsCount = apiEvent?.rounds_count ?? 0;
+  const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
+
+  // When a round is open show current_round_number; when between rounds (closed) show
+  // completed_rounds so the header reads "Round 2" (last done) not "Round 3" (next).
+  const currentRoundNum = hasOpenRound
+    ? (apiEvent?.current_round_number ?? apiEvent?.completed_rounds ?? 0)
+    : (apiEvent?.completed_rounds ?? apiEvent?.current_round_number ?? 0);
 
   const scaleLabels = targetAmount > 0
     ? [0.33, 0.66, 1].map(f => { const v = Math.round(targetAmount * f); return v >= 1000 ? `£${Math.round(v / 1000)}k` : `£${v}`; })
     : ['£5k', '£10k', '£15k'];
-
-  const openRound    = rounds.find(r => r.status === 'bidding');
-  const hasOpenRound = !!openRound;
-  const allRoundsDone = rounds.length === totalRoundsCount && rounds.every(r => r.status === 'complete');
 
   // Reset pgaLaunched once a new round is actually open
   useEffect(() => {
     if (hasOpenRound) setPgaLaunched(false);
   }, [hasOpenRound]);
 
+  // ─── Detect when timerSecs hits 0 while a round is open ──────────────────
+  // Switches polling to 2s aggressive mode until backend confirms round closed.
+  useEffect(() => {
+    if (timerSecs === 0 && hasOpenRound && apiEvent?.status === 'live') {
+      setRoundEnding(true);
+    }
+  }, [timerSecs, hasOpenRound, apiEvent?.status]);
+
+  // ─── Reset roundEnding once backend confirms no open round ───────────────
+  useEffect(() => {
+    if (!hasOpenRound && roundEnding) {
+      setRoundEnding(false);
+    }
+  }, [hasOpenRound, roundEnding]);
+
   // Show "Proposed Group Allocations" button:
-  // (a) backend confirmed round closed: no open round + at least one complete
-  // (b) waiting period is active: bidding timer hit 0 and waiting countdown is running
+  // ONLY when the backend confirms the round is fully closed (!hasOpenRound).
+  // Never shown at the same time as the Call Time button.
   const hasClosedRound   = rounds.some(r => r.status === 'complete');
-  const inWaitingPeriod  = hasOpenRound && timerSecs === 0 && waitingSecs > 0;
+  const inWaitingPeriod  = !hasOpenRound && waitingSecs > 0;
   const roundJustClosed  = (
-    (!hasOpenRound && hasClosedRound && !allRoundsDone) || inWaitingPeriod
+    !hasOpenRound && hasClosedRound && !allRoundsDone
   ) && apiEvent?.status === 'live' && !pgaLaunched;
 
   // ─── Build PgaGroup[] from API current_groups ────────────────────────────
@@ -451,6 +482,94 @@ const ViewEvent: React.FC = () => {
       setPgaToast('Groups rebalanced');
       setTimeout(() => setPgaToast(null), 2500);
     } catch (err) { console.error(err); }
+  };
+
+  // ── Open action sheet when Move button clicked ──────────────────────────
+  const pgaOpenActionSheet = (groupId: number) => {
+    const group = pgaGroups.find(g => g.id === groupId);
+    if (!group) return;
+    const selectedIds = group.members.filter(m => m.selected && m.groupMemberId > 0).map(m => m.groupMemberId);
+    if (selectedIds.length === 0) return;
+    setPgaActionSheet({ open: true, fromGroupId: groupId, selectedMemberIds: selectedIds });
+  };
+
+  const pgaCloseActionSheet = () =>
+    setPgaActionSheet({ open: false, fromGroupId: null, selectedMemberIds: [] });
+
+  // ── Delete selected members ───────────────────────────────────────────────
+  const pgaDeleteMembers = async () => {
+    const { fromGroupId, selectedMemberIds } = pgaActionSheet;
+    if (!fromGroupId || !eventId || selectedMemberIds.length === 0) { pgaCloseActionSheet(); return; }
+    setPgaDeleteLoading(true);
+    // Optimistic update
+    setPgaGroups(prev => prev.map(g =>
+      g.id !== fromGroupId ? g :
+      { ...g, members: g.members.filter(m => !selectedMemberIds.includes(m.groupMemberId)) }
+    ));
+    pgaCloseActionSheet();
+    try {
+      await deleteGroupMembers(Number(eventId), fromGroupId, selectedMemberIds);
+      const count = selectedMemberIds.length;
+      setPgaToast(`${count} member${count !== 1 ? 's' : ''} removed`);
+    } catch (err) {
+      console.error(err);
+      await refreshEvent();
+      if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+      setPgaToast('Delete failed — changes reverted.');
+    } finally {
+      setPgaDeleteLoading(false);
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  };
+
+  // ── Create new group and move selected members into it ────────────────────
+  const pgaCreateGroupAndMove = async () => {
+    const { fromGroupId, selectedMemberIds } = pgaActionSheet;
+    if (!fromGroupId || !eventId || selectedMemberIds.length === 0) { pgaCloseActionSheet(); return; }
+    setPgaCreateLoading(true);
+    pgaCloseActionSheet();
+    try {
+      // Create new group on backend
+      const res = await createGroup(Number(eventId));
+      const newGroup: PgaGroup = {
+        id:       res.group.id,
+        label:    res.group.name,
+        expanded: true,
+        members:  [],
+      };
+      // Optimistic: remove from old group, add to new group
+      const fromGroup = pgaGroups.find(g => g.id === fromGroupId);
+      const movedMembers = (fromGroup?.members ?? [])
+        .filter(m => selectedMemberIds.includes(m.groupMemberId))
+        .map(m => ({ ...m, selected: false }));
+      setPgaGroups(prev => [
+        ...prev.map(g =>
+          g.id !== fromGroupId ? g :
+          { ...g, members: g.members.filter(m => !selectedMemberIds.includes(m.groupMemberId)) }
+        ),
+        { ...newGroup, members: movedMembers },
+      ]);
+      // Move members to new group on backend
+      await moveGroupMembers(Number(eventId), fromGroupId, res.group.id, selectedMemberIds);
+      const count = selectedMemberIds.length;
+      setPgaToast(`${count} member${count !== 1 ? 's' : ''} moved to ${res.group.name}`);
+    } catch (err) {
+      console.error(err);
+      await refreshEvent();
+      if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+      setPgaToast('Failed — changes reverted.');
+    } finally {
+      setPgaCreateLoading(false);
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  };
+
+  // ── Open move sheet from action sheet ────────────────────────────────────
+  const pgaOpenMoveFromAction = () => {
+    const { fromGroupId, selectedMemberIds } = pgaActionSheet;
+    pgaCloseActionSheet();
+    if (!fromGroupId || selectedMemberIds.length === 0) return;
+    setMoveSheet({ open: true, fromGroupId, selectedMemberIds });
   };
 
   const pgaLaunchNextRound = async () => {
@@ -735,7 +854,7 @@ const ViewEvent: React.FC = () => {
                     {formatTimer(waitingSecs)}
                   </div>
                 )}
-                <span className="ve-round-complete">{(hasOpenRound && timerSecs > 0) ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>
+                {/*<span className="ve-round-complete">{hasOpenRound ? (apiEvent?.round_progress ?? '0/0 Complete') : `${apiEvent?.completed_rounds ?? 0}/${totalRoundsCount} Complete`}</span>*/}
               </div>
 
               {groups.length > 0 ? (
@@ -787,7 +906,7 @@ const ViewEvent: React.FC = () => {
           {/* ── NEW: After round closes — show Proposed Group Allocations button ── */}
           {roundJustClosed && (
             <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={openPGA}>
-              Proposed Group Allocations →{inWaitingPeriod && waitingSecs > 0 ? ` (${formatTimer(waitingSecs)})` : ''}
+              Proposed Group Allocations →{waitingSecs > 0 ? ` (${formatTimer(waitingSecs)})` : ''}
             </div>
           )}
 
@@ -1124,10 +1243,10 @@ const ViewEvent: React.FC = () => {
                           </div>
                           <button
                             className="ve-pga-move-btn"
-                            onClick={() => pgaOpenMoveSheet(group.id)}
-                            disabled={selectedCount === 0 || pgaMoveLoading}
+                            onClick={() => pgaOpenActionSheet(group.id)}
+                            disabled={selectedCount === 0 || pgaMoveLoading || pgaDeleteLoading || pgaCreateLoading}
                           >
-                            {selectedCount > 0 ? `Move (${selectedCount})` : 'Move'}
+                            {selectedCount > 0 ? `Actions (${selectedCount})` : 'Actions'}
                           </button>
                         </div>
                       )}
@@ -1146,6 +1265,46 @@ const ViewEvent: React.FC = () => {
               </div>
             </div>
 
+            {/* ── Action sheet: Move / Delete / New Group ── */}
+            {pgaActionSheet.open && (
+              <div className="ve-pga-move-backdrop">
+                <div className="ve-pga-move-sheet" ref={moveSheetRef}>
+                  <div className="ve-sheet-handle" />
+                  <h3 className="ve-pga-move-title">
+                    {pgaActionSheet.selectedMemberIds.length} member{pgaActionSheet.selectedMemberIds.length !== 1 ? 's' : ''} selected
+                  </h3>
+                  <div className="ve-pga-move-group-list">
+                    {/* Move to existing group */}
+                    <button className="ve-pga-action-row ve-pga-action-row--move" onClick={pgaOpenMoveFromAction} disabled={pgaMoveLoading}>
+                      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                        <path d="M3 9h12M10 4l5 5-5 5" stroke="#1A1A2E" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span>Move to existing group</span>
+                    </button>
+                    {/* Create new group */}
+                    <button className="ve-pga-action-row ve-pga-action-row--create" onClick={pgaCreateGroupAndMove} disabled={pgaCreateLoading}>
+                      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                        <circle cx="9" cy="9" r="7.5" stroke="#2BA7A0" strokeWidth="1.5"/>
+                        <path d="M9 6v6M6 9h6" stroke="#2BA7A0" strokeWidth="1.6" strokeLinecap="round"/>
+                      </svg>
+                      <span>{pgaCreateLoading ? 'Creating…' : 'Create new group'}</span>
+                    </button>
+                    {/* Delete members */}
+                    <button className="ve-pga-action-row ve-pga-action-row--delete" onClick={pgaDeleteMembers} disabled={pgaDeleteLoading}>
+                      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                        <path d="M3 5h12M7 5V3.5h4V5M7.5 8v5M10.5 8v5M4 5l1 10h8l1-10" stroke="#E53E3E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span>{pgaDeleteLoading ? 'Removing…' : 'Remove from event'}</span>
+                    </button>
+                    {/* Cancel */}
+                    <button className="ve-pga-action-row ve-pga-action-row--cancel" onClick={pgaCloseActionSheet}>
+                      <span>Cancel</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── Move destination sheet ── */}
             {moveSheet.open && (
               <div className="ve-pga-move-backdrop">
@@ -1162,20 +1321,26 @@ const ViewEvent: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Destination group rows */}
+                  {/* Destination group rows — show full indicator */}
                   <div className="ve-pga-move-group-list">
                     {pgaGroups.map(g => {
-                      const isCurrent = g.id === moveSheet.fromGroupId;
+                      const isCurrent  = g.id === moveSheet.fromGroupId;
+                      const groupSize  = apiEvent?.group_size ?? 999;
+                      const wouldFill  = g.members.length + moveSheet.selectedMemberIds.length;
+                      const isFull     = !isCurrent && g.members.length >= groupSize;
+                      const wouldOver  = !isCurrent && wouldFill > groupSize;
+                      const isDisabled = isCurrent || isFull || wouldOver || pgaMoveLoading;
                       return (
                         <button
                           key={g.id}
-                          className={`ve-pga-move-group-row ${isCurrent ? 've-pga-move-group-row--current' : ''}`}
-                          onClick={() => !isCurrent && pgaMoveMembers(g.id)}
-                          disabled={isCurrent || pgaMoveLoading}
+                          className={`ve-pga-move-group-row ${isCurrent ? 've-pga-move-group-row--current' : ''} ${(isFull || wouldOver) ? 've-pga-move-group-row--full' : ''}`}
+                          onClick={() => !isDisabled && pgaMoveMembers(g.id)}
+                          disabled={isDisabled}
                         >
                           <span className="ve-pga-move-group-name">{g.label}</span>
-                          <span className="ve-pga-move-group-count">{g.members.length}</span>
-                          {isCurrent && <span className="ve-pga-move-current-badge">Current</span>}
+                          <span className="ve-pga-move-group-count">{g.members.length}/{groupSize}</span>
+                          {isCurrent  && <span className="ve-pga-move-current-badge">Current</span>}
+                          {(isFull || wouldOver) && !isCurrent && <span className="ve-pga-move-full-badge">Full</span>}
                         </button>
                       );
                     })}

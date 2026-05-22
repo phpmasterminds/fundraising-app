@@ -222,3 +222,24 @@ export async function rebalanceGroups(
   const { data } = await api.post(`/host/events/${eventId}/groups/rebalance`);
   return data;
 }
+
+// DELETE /api/host/events/{eventId}/groups/{groupId}/members  (bulk delete)
+export const deleteGroupMembers = async (
+  eventId: number,
+  groupId: number,
+  groupMemberIds: number[]
+): Promise<void> => {
+  await api.delete(
+    `/host/events/${eventId}/groups/${groupId}/members`,
+    { data: { group_member_ids: groupMemberIds } }
+  );
+};
+ 
+// POST /api/host/events/{eventId}/groups  (create new empty group)
+export const createGroup = async (
+  eventId: number
+): Promise<{ message: string; group: { id: number; name: string; [key: string]: any } }> => {
+  const res = await api.post(`/host/events/${eventId}/groups`);
+  return res.data;
+};
+ 

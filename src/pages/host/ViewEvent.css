@@ -1605,3 +1605,50 @@
     margin-left: 6px;
     vertical-align: middle;
 }
+/* ── PGA Action Sheet rows ──────────────────────────────────────────────── */
+.ve-pga-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 15px 16px;
+  border: none;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: #F7F8FA;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1A1A2E;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.ve-pga-action-row:active { background: #ECEEF1; }
+.ve-pga-action-row--move   { color: #1A1A2E; }
+.ve-pga-action-row--create { color: #2BA7A0; background: #E6F4F2; }
+.ve-pga-action-row--create:active { background: #CCE9E7; }
+.ve-pga-action-row--delete { color: #E53E3E; background: #FFF5F5; }
+.ve-pga-action-row--delete:active { background: #FED7D7; }
+.ve-pga-action-row--cancel { justify-content: center; color: #9AA0A6; background: transparent; margin-top: 4px; }
+.ve-pga-action-row:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Move sheet full badge ───────────────────────────────────────────────── */
+.ve-pga-move-full-badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #E53E3E;
+  background: #FFF5F5;
+  border: 1px solid #FED7D7;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.ve-pga-move-group-row--full {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ve-pga-move-group-count {
+  font-size: 13px;
+  color: #9AA0A6;
+  margin-left: 8px;
+}

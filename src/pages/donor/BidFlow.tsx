@@ -20,13 +20,6 @@ import 'swiper/css/pagination';
 import { Pagination, EffectCoverflow } from 'swiper/modules';
 import 'swiper/css/effect-coverflow';
 
-const slideImages = [
-  '/assets/img/Slide1.jpg',
-  '/assets/img/Slide2.jpg',
-  '/assets/img/Slide1.jpg',
-  '/assets/img/Slide2.jpg',
-  '/assets/img/Slide3.jpg',
-];
 
 type Screen =
   | 'starting'
@@ -56,6 +49,7 @@ const BidFlow: React.FC = () => {
   const [totalRounds, setTotalRounds] = useState(location.state?.totalRounds ?? 0);
   const [eventName,   setEventName]   = useState(location.state?.eventName   ?? '');
   const [myPseudonym, setMyPseudonym] = useState(location.state?.myPseudonym ?? 'You');
+  const [eventImages, setEventImages] = useState<string[]>([]); // event images for payment slider
 
   const [screen,        setScreen]       = useState<Screen>('starting');
   const [checking,      setChecking]     = useState(true); // checking event status on mount
@@ -83,6 +77,7 @@ const BidFlow: React.FC = () => {
   const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
   const [waitingSecsLeft,    setWaitingSecsLeft]    = useState<number | null>(null);
   const [roundCloseSecsLeft, setRoundCloseSecsLeft] = useState<number | null>(null); // countdown on round-results
+  const [roundEnding,        setRoundEnding]        = useState(false); // timer hit 0, waiting for backend to confirm closed
 
   const [paymentData,  setPaymentData]  = useState<PaymentSummary | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -111,6 +106,7 @@ const BidFlow: React.FC = () => {
     setRoundSecsLeft(null);
     setWaitingSecsLeft(null);
     setRoundCloseSecsLeft(null);
+    setRoundEnding(false);
     setPaymentData(null);
     setHasPaid(false);
     // Kill any running timers/polls from the old event
@@ -154,6 +150,11 @@ const BidFlow: React.FC = () => {
       setTotalRounds(d.rounds_count ?? 2);
       setEventName(d.name ?? '');
       setMyPseudonym(d.my_pseudonym ?? 'You');
+      // Build full storage URLs for event images
+      if (d.images?.length) {
+        const base = (import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '');
+        setEventImages(d.images.map((p: string) => `${base}/storage/${p}`));
+      }
     }).catch(() => setTotalRounds(2));
   }, [stateEventId]);
 
@@ -224,6 +225,7 @@ const BidFlow: React.FC = () => {
         if (res.round_status === 'closed' || res.round_status === 'grouping') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
           setRoundSecsLeft(0); // stop the round timer display
+          setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -297,10 +299,14 @@ const BidFlow: React.FC = () => {
                 setGroupBidsOpen(false);
                 setScreen('round-results');
               }).catch(() => setScreen('round-results'));
+            } else {
+              // Round still 'open' on backend — timer expired but host hasn't closed yet.
+              // Set roundEnding so Effect 4b polls every 2s until confirmed closed.
+              setRoundEnding(true);
             }
-            // If still 'open', stay put — the UI already shows 00:00 which is accurate
           }).catch(() => {
-            // Network error — gracefully fall through; polling will catch it
+            // Network error — set roundEnding so polling takes over
+            setRoundEnding(true);
           });
           return 0;
         }
@@ -309,6 +315,47 @@ const BidFlow: React.FC = () => {
     }, 1000);
     return () => clearInterval(roundTimerRef.current);
   }, [screen, !!roundSecsLeft && roundSecsLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 4b. When roundEnding=true: poll every 2s until backend confirms round closed/finished
+  useEffect(() => {
+    if (!roundEnding) return;
+    if (screen !== 'bid-entry' && screen !== 'confirm-bid') return;
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await getRoundStatus(eventId);
+        if (res.payment_status === 'paid') {
+          clearInterval(pollRef.current); setRoundEnding(false);
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          setScreen('receipt'); return;
+        }
+        if (res.event_status === 'finished' || res.round_status === 'finished') {
+          clearInterval(pollRef.current); setRoundEnding(false);
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          setScreen('payment-intro'); return;
+        }
+        if (res.round_status === 'closed' || res.round_status === 'grouping') {
+          clearInterval(pollRef.current); setRoundEnding(false);
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+            if (d.seconds_left !== null && d.seconds_left > 0) setRoundCloseSecsLeft(d.seconds_left);
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results'); return;
+        }
+        if (res.round_status === 'waiting') {
+          clearInterval(pollRef.current); setRoundEnding(false);
+          setWaitingSecsLeft(res.seconds_until_next);
+          setGroupBidsOpen(false);
+          setScreen('round-results'); return;
+        }
+        // still 'open' — keep polling
+      } catch (_) {}
+    }, 2000);
+    return () => clearInterval(pollRef.current);
+  }, [roundEnding, screen, eventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5. submitted → fetch results → round-results
   useEffect(() => {
@@ -636,6 +683,14 @@ const BidFlow: React.FC = () => {
     ?? paymentData?.total_amount
     ?? 0;
 
+  // Event images for the payment slider — use real event images, no static fallback
+  const base = (import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '');
+  const paymentSlideImages: string[] = eventImages.length
+    ? eventImages
+    : (paymentData?.event_images ?? []).map((p: string) =>
+        p.startsWith('http') ? p : `${base}/storage/${p}`
+      );
+
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
@@ -735,7 +790,7 @@ const BidFlow: React.FC = () => {
         <div className="bf-cta-wrap">
           {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
             <div style={{ textAlign:'center', padding:'16px 0', color:'#9AA0A6', fontSize:14, fontWeight:500 }}>
-              ⏱ Round time has ended — bidding is now closed.
+              {roundEnding ? '⏳ Round ending — please wait...' : '⏱ Round time has ended — bidding is now closed.'}
             </div>
           ) : (
             <button className="bf-orange-btn" onClick={() => setScreen('confirm-bid')}>
@@ -787,7 +842,7 @@ const BidFlow: React.FC = () => {
         <div className="bf-cta-wrap bf-cta-wrap--bottom">
           {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
             <div style={{ textAlign:'center', padding:'16px 0', color:'#9AA0A6', fontSize:14, fontWeight:500 }}>
-              ⏱ Round time has ended — bidding is now closed.
+              {roundEnding ? '⏳ Round ending — please wait...' : '⏱ Round time has ended — bidding is now closed.'}
             </div>
           ) : (
             <button className="bf-orange-btn" onClick={handlePlaceBid} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
@@ -999,14 +1054,16 @@ const BidFlow: React.FC = () => {
           <p className="bf-pay-intro-sub">The event has concluded. Your final pledge is:</p>
           <p className="bf-pay-intro-amount">£{paymentTotal}</p>
           <div className="bf-carousel" style={{ width:'100%' }}>
-            <Swiper modules={[Pagination, EffectCoverflow]} effect="coverflow" grabCursor centeredSlides slidesPerView="auto"
-              coverflowEffect={{ rotate:0, stretch:0, depth:100, modifier:2.5, slideShadows:false }}
-              pagination={{ clickable: true }} className="stack-carousel"
-              onSlideChange={s => setCurrentSlide(s.activeIndex)}>
-              {slideImages.map((src, i) => (
-                <SwiperSlide key={i} className="stack-slide"><img src={src} className="stack-img" alt="" /></SwiperSlide>
-              ))}
-            </Swiper>
+            {paymentSlideImages.length > 0 && (
+              <Swiper modules={[Pagination, EffectCoverflow]} effect="coverflow" grabCursor centeredSlides slidesPerView="auto"
+                coverflowEffect={{ rotate:0, stretch:0, depth:100, modifier:2.5, slideShadows:false }}
+                pagination={{ clickable: true }} className="stack-carousel"
+                onSlideChange={s => setCurrentSlide(s.activeIndex)}>
+                {paymentSlideImages.map((src, i) => (
+                  <SwiperSlide key={i} className="stack-slide"><img src={src} className="stack-img" alt="" /></SwiperSlide>
+                ))}
+              </Swiper>
+            )}
           </div>
         </div>
         <div className="bf-pay-intro-ctas">
