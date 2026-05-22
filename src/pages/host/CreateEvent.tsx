@@ -465,27 +465,39 @@ const CreateEvent: React.FC = () => {
           ) : (
             /* ── Filled: thumbnail row ── */
             <div className="image-preview-grid">
-              {imagePreviews.map((src, i) => (
-                <div key={i} className="image-preview-thumb">
-                  <img src={src} alt={`img-${i}`} />
-                  <button
-                    className="image-preview-remove"
-                    onClick={() => removeImage(i)}
-                    type="button"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              {imagePreviews.length < 10 && (
-                <label className="image-preview-add">
-                  <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <path d="M9 3v12M3 9h12" stroke="#9AA0A6" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                  <span>Add</span>
-                </label>
-              )}
+         {imagePreviews.map((src, i) => (
+    <div key={i} className="image-preview-thumb">
+      <img src={src} alt={`img-${i}`} />
+
+      <button
+        type="button"
+        className="image-preview-remove"
+        onClick={() => removeImage(i)}
+      >
+        ✕
+      </button>
+    </div>
+  ))}
+               {imagePreviews.length < 10 && (
+    <label className="image-preview-add">
+      <input
+        type="file"
+        hidden
+        multiple
+        accept="image/*"
+        onChange={handleImages}
+      />
+
+      <img
+	  className='addimg'
+        src="/assets/img/upload.svg"
+        alt=""
+        style={{ width: 20, height: 20, }}
+      />
+
+      <span>Add</span>
+    </label>
+  )}
             </div>
           )}
           {fieldErrors.images && <span className="field-error">{fieldErrors.images}</span>}
