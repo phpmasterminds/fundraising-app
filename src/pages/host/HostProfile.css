@@ -17,8 +17,18 @@
   margin: 0 auto;
   padding: 0 20px 140px;
 }
-
-
+.hp-page label {
+    display: block;
+    font-size: 14px;
+    color: #696969;
+    margin-top: 14px;
+    text-align: left;
+}
+.hp-hint
+{
+	    font-size: 10px;
+    color: #696969;
+}
 /* ── Avatar ─────────────────────── */
 
 .hp-avatar-row {

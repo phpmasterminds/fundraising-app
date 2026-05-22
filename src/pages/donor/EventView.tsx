@@ -84,7 +84,38 @@ const EventView: React.FC = () => {
 
     load();
   }, [eventId]);
+useEffect(() => {
+  const interval = setInterval(async () => {
+    if (!eventId) return;
 
+    try {
+      let data: DonorEventDetail;
+
+      if (isLoggedIn) {
+        data = await getDonorEventDetail(eventId);
+      } else {
+        const code = localStorage.getItem('event_code') ?? '';
+        if (!code) return;
+
+        data = await getEventByCode(code);
+        data = data.event;
+      }
+
+      setEvent(data);
+
+      const s = countdownSeconds(data.started_at);
+      setSeconds(s);
+
+      if (s === 0 || data.status === 'live') {
+        setIsActive(true);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, 10000); // refresh every 10 seconds
+
+  return () => clearInterval(interval);
+}, [eventId, isLoggedIn]);
   // ── Countdown timer ───────────────────────────────────────────
   useEffect(() => {
     if (isActive || seconds <= 0) return;
