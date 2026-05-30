@@ -4,7 +4,7 @@ import {
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './DonorProfile.css';
 import DonorHeader from '../../components/DonorHeader';
 import { joinEvent, getDonorEventDetail } from '../../services/donorEvents';
@@ -54,6 +54,16 @@ const DonorProfile: React.FC = () => {
     preview ??
     (storedUser.avatar ? buildStorageUrl(storedUser.avatar) : null);
 
+  // ── Event info (for join subtitle) ───────────────
+  const [eventInfo, setEventInfo] = useState<{ title?: string; charity_name?: string } | null>(null);
+
+  useEffect(() => {
+    if (!isJoin) return;
+    const eventId = Number(localStorage.getItem('event_id'));
+    if (!eventId) return;
+    getDonorEventDetail(eventId).then(data => setEventInfo(data)).catch(() => {});
+  }, [isJoin]);
+
   // ── Save state ────────────────────────────────────
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -67,6 +77,9 @@ const DonorProfile: React.FC = () => {
   const [pwError,     setPwError]     = useState<string | null>(null);
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwSuccess,   setPwSuccess]   = useState(false);
+
+  // ── Email tooltip ─────────────────────────────────
+  const [showEmailTip, setShowEmailTip] = useState(false);
 
   const handleRandomName = () => {
     const pick = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
@@ -172,7 +185,9 @@ const DonorProfile: React.FC = () => {
             <>
               <h2 className="title">Join the Event</h2>
               <p className="subtitle">
-                Ocean Guardian Gala 2026 by Clean Oceans Initiative
+                {eventInfo
+                  ? `${eventInfo.name ?? ''} by ${eventInfo.charity_name ?? ''}`.trim()
+                  : 'Loading event…'}
               </p>
             </>
           )}
@@ -227,14 +242,23 @@ const DonorProfile: React.FC = () => {
               <label>Email Address</label>
               <div className="input-box input-box--readonly">
                 <input value={email} readOnly />
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M12 17V11M12 7H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"
-                    stroke="#BDBDBD" strokeWidth="1.8" strokeLinecap="round"
-                  />
-                </svg>
+                <div className="email-tip-wrap">
+                  <svg
+                    width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    onMouseEnter={() => setShowEmailTip(true)}
+                    onMouseLeave={() => setShowEmailTip(false)}
+                    style={{ cursor: 'default', flexShrink: 0 }}
+                  >
+                    <path
+                      d="M12 17V11M12 7H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"
+                      stroke="#BDBDBD" strokeWidth="1.8" strokeLinecap="round"
+                    />
+                  </svg>
+                  {showEmailTip && (
+                    <div className="email-tooltip">Email cannot be changed.</div>
+                  )}
+                </div>
               </div>
-              <small>Email cannot be changed.</small>
             </div>
 
             {/* Display Name */}

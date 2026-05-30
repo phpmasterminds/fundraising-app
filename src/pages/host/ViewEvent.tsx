@@ -187,6 +187,7 @@ const ViewEvent: React.FC = () => {
     if (!eventId) return;
     const data = await getEvent(Number(eventId));
     setApiEvent(data);
+    setIgnoreZeroBids(!!(data as any).ignore_zero_bids);
     if ((data as any).seconds_left != null || (data as any).waiting_seconds_left != null) {
       seedCountdown(data);
     }
@@ -199,6 +200,7 @@ const ViewEvent: React.FC = () => {
       setEditName(data.name ?? '');
       setEditCharityName(data.charity_name ?? '');
       setEditTargetAmount(String(data.target_amount ?? ''));
+      setIgnoreZeroBids(!!(data as any).ignore_zero_bids);
       if ((data as any).seconds_left != null || (data as any).waiting_seconds_left != null) {
         seedCountdown(data);
       }
@@ -742,7 +744,12 @@ const ViewEvent: React.FC = () => {
                 </svg>
                 <span className="ve-control-label">Ignore Zero Bids</span>
               </div>
-              <div className={`ve-toggle ${ignoreZeroBids ? 've-toggle--on' : ''}`} onClick={() => setIgnoreZeroBids(p => !p)}>
+              <div className={`ve-toggle ${ignoreZeroBids ? 've-toggle--on' : ''}`} onClick={async () => {
+                const next = !ignoreZeroBids;
+                setIgnoreZeroBids(next);
+                try { await updateEvent(Number(eventId), { ignore_zero_bids: next }); }
+                catch (e) { console.error('Failed to save ignore_zero_bids', e); setIgnoreZeroBids(!next); }
+              }}>
                 <div className="ve-toggle-knob" />
               </div>
             </div>
@@ -791,7 +798,7 @@ const ViewEvent: React.FC = () => {
                   <circle cx="10" cy="10" r="4" stroke="#2BA7A0" strokeWidth="1.6" />
                   <circle cx="10" cy="10" r="1" fill="#2BA7A0" />
                 </svg>
-                <p className="ve-stat-value">{apiEvent?.completed_rounds ?? currentRoundNum}/{totalRoundsCount}</p>
+                <p className="ve-stat-value">{currentRoundNum}/{totalRoundsCount}</p>
                 <p className="ve-stat-label">Round</p>
               </div>
             </div>

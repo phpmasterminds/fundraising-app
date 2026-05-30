@@ -13,6 +13,22 @@ import { createEvent } from '../../services/events';
 import type { ApiError } from '../../services/api';
 
 
+// Returns current date/time in London timezone
+const getLondonNow = () => {
+  const now = new Date();
+  const londonStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
+  // en-GB format: "DD/MM/YYYY, HH:MM:SS"
+  const [datePart, timePart] = londonStr.split(', ');
+  const [dd, mm, yyyy] = datePart.split('/');
+  const [hh, mins] = timePart.split(':');
+  return {
+    dateISO: `${yyyy}-${mm}-${dd}`,
+    hours: parseInt(hh),
+    minutes: parseInt(mins),
+    totalMins: parseInt(hh) * 60 + parseInt(mins),
+  };
+};
+
 const CreateEvent: React.FC = () => {
 
   const router = useIonRouter();
@@ -69,6 +85,12 @@ const CreateEvent: React.FC = () => {
   const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setFieldErrors(prev => ({ ...prev, logo: 'Avatar must be under 2MB' }));
+        e.target.value = '';
+        return;
+      }
+      setFieldErrors(prev => ({ ...prev, logo: '' }));
       setLogoFile(file);
       setLogoPreview(URL.createObjectURL(file));
     }
@@ -79,6 +101,18 @@ const CreateEvent: React.FC = () => {
     const combined = [...imageFiles, ...files];
     if (combined.length > 10) {
       setFieldErrors(prev => ({ ...prev, images: 'Maximum 10 images allowed' }));
+      return;
+    }
+    const oversized = files.some(f => f.size > 2 * 1024 * 1024);
+    if (oversized) {
+      setFieldErrors(prev => ({ ...prev, images: 'Each image must be under 2MB' }));
+      e.target.value = '';
+      return;
+    }
+    const totalSize = combined.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > 8 * 1024 * 1024) {
+      setFieldErrors(prev => ({ ...prev, images: 'Total upload size must be under 8MB' }));
+      e.target.value = '';
       return;
     }
     const previews = files.map(f => URL.createObjectURL(f));
@@ -218,6 +252,7 @@ const CreateEvent: React.FC = () => {
   </label>
 
 </div>
+          {fieldErrors.logo && <span className="field-error">{fieldErrors.logo}</span>}
 
           {/* Title */}
           <label>Title</label>
@@ -299,7 +334,7 @@ const CreateEvent: React.FC = () => {
       <input
         type="date"
         className="hidden-date-input"
-        min={new Date().toISOString().split('T')[0]}
+        min={getLondonNow().dateISO}
         value={rawDate}
         onChange={(e) => {
 
@@ -352,13 +387,14 @@ const CreateEvent: React.FC = () => {
         disabled={!rawDate}
         value={rawTime}
         min={
-          rawDate ===
-          new Date().toISOString().split('T')[0]
-            ? new Date(
-                Date.now() + 5 * 60000
-              )
-                .toTimeString()
-                .slice(0, 5)
+          rawDate === getLondonNow().dateISO
+            ? (() => {
+                const london = getLondonNow();
+                const totalMins = london.totalMins + 5;
+                const h = String(Math.floor(totalMins / 60) % 24).padStart(2, '0');
+                const m = String(totalMins % 60).padStart(2, '0');
+                return `${h}:${m}`;
+              })()
             : undefined
         }
         onChange={(e) => {
@@ -370,15 +406,12 @@ const CreateEvent: React.FC = () => {
 
           // prevent past time for today
           if (
-            rawDate ===
-            new Date().toISOString().split('T')[0]
+            rawDate === getLondonNow().dateISO
           ) {
 
-            const now = new Date();
+            const london = getLondonNow();
 
-            const currentTotal =
-              now.getHours() * 60 +
-              now.getMinutes();
+            const currentTotal = london.totalMins;
 
             const [hh, mm] =
               selectedTime.split(':');
@@ -488,7 +521,7 @@ const CreateEvent: React.FC = () => {
             <label className="upload-box">
               <img src="/assets/img/upload.svg" alt="" />
               <p>Upload</p>
-              <small>Max 10 Images</small>
+              <small>Max 10 Images · 2MB per image · 8MB total</small>
               <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
             </label>
           ) : (
@@ -571,7 +604,7 @@ const CreateEvent: React.FC = () => {
   presentation="date"
   preferWheel={true}
   showDefaultButtons={false}
-  min={new Date().toISOString().split('T')[0]}
+  min={getLondonNow().dateISO}
   value={rawDate}
   onIonChange={(e) => {
 
@@ -609,8 +642,13 @@ const CreateEvent: React.FC = () => {
   minuteValues="0,5,10,15,20,25,30,35,40,45,50,55"
   value={rawTime}
   min={
-    rawDate === new Date().toISOString().split('T')[0]
-      ? new Date().toISOString()
+    rawDate === getLondonNow().dateISO
+      ? (() => {
+          const london = getLondonNow();
+          const h = String(london.hours).padStart(2, '0');
+          const m = String(london.minutes).padStart(2, '0');
+          return `${getLondonNow().dateISO}T${h}:${m}:00`;
+        })()
       : undefined
   }
   onIonChange={(e) => {
@@ -627,29 +665,18 @@ const CreateEvent: React.FC = () => {
 
     const selectedTime = `${hh}:${mm}`;
 
-    // If selected date is today,
-    // block completed/past time
-    if (rawDate === new Date().toISOString().split('T')[0]) {
+    // If selected date is today (London),
+    // block past time
+    if (rawDate === getLondonNow().dateISO) {
 
-      const now = new Date();
-
-      const currentHours = now.getHours();
-      const currentMinutes = now.getMinutes();
-
-      const selectedHours = parseInt(hh);
-      const selectedMinutes = parseInt(mm);
-
-      const currentTotal =
-        currentHours * 60 + currentMinutes;
+      const london = getLondonNow();
 
       const selectedTotal =
-        selectedHours * 60 + selectedMinutes;
+        parseInt(hh) * 60 + parseInt(mm);
 
       // Prevent selecting elapsed time
-      if (selectedTotal <= currentTotal) {
+      if (selectedTotal <= london.totalMins) {
 
-        // Optional:
-        // reset invalid selection
         setRawTime('');
         setTime('');
 

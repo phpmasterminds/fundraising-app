@@ -39,6 +39,7 @@ export interface Event {
   is_member?:            boolean;
   duration?:             string;
   round_time?:           number;   // seconds — waiting period between rounds
+  ignore_zero_bids?:     boolean;
   // Round state
   current_round_number?: number;
   completed_rounds?:     number;
@@ -152,10 +153,11 @@ export async function createEvent(payload: CreateEventPayload): Promise<Event> {
 }
 
 export async function updateEvent(id: number, data: {
-  name?:          string;
-  charity_name?:  string;
-  target_amount?: number;
-  round_time?:    number;   // seconds — can be updated after creation
+  name?:             string;
+  charity_name?:     string;
+  target_amount?:    number;
+  round_time?:       number;   // seconds — can be updated after creation
+  ignore_zero_bids?: boolean;
 }): Promise<Event> {
   const { data: result } = await api.put<Event>(`/host/events/${id}`, data, {
     headers: { 'Content-Type': 'application/json' },
@@ -242,4 +244,3 @@ export const createGroup = async (
   const res = await api.post(`/host/events/${eventId}/groups`);
   return res.data;
 };
- 

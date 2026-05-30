@@ -50,6 +50,7 @@ const BidFlow: React.FC = () => {
   const [eventName,   setEventName]   = useState(location.state?.eventName   ?? '');
   const [myPseudonym, setMyPseudonym] = useState(location.state?.myPseudonym ?? 'You');
   const [eventImages, setEventImages] = useState<string[]>([]); // event images for payment slider
+  const [ignoreZeroBids, setIgnoreZeroBids] = useState(true); // default true; false = allow £0 bids
 
   const [screen,        setScreen]       = useState<Screen>('starting');
   const [checking,      setChecking]     = useState(true); // checking event status on mount
@@ -144,12 +145,21 @@ const BidFlow: React.FC = () => {
       setTotalRounds(location.state.totalRounds);
       setEventName(location.state.eventName ?? '');
       setMyPseudonym(location.state.myPseudonym ?? 'You');
+      // Still fetch event detail to get ignore_zero_bids and images (not passed via location state)
+      getDonorEventDetail(stateEventId).then(d => {
+        setIgnoreZeroBids(d.ignore_zero_bids !== false);
+        if (d.images?.length) {
+          const base = (import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '');
+          setEventImages(d.images.map((p: string) => `${base}/storage/${p}`));
+        }
+      }).catch(() => {});
       return;
     }
     getDonorEventDetail(stateEventId).then(d => {
       setTotalRounds(d.rounds_count ?? 2);
       setEventName(d.name ?? '');
       setMyPseudonym(d.my_pseudonym ?? 'You');
+      setIgnoreZeroBids(d.ignore_zero_bids !== false);
       // Build full storage URLs for event images
       if (d.images?.length) {
         const base = (import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '');
@@ -601,7 +611,7 @@ const BidFlow: React.FC = () => {
     if (submitting) return;
     if (roundSecsLeft !== null && roundSecsLeft <= 0) { setSubmitError('Round has ended. Bidding is closed.'); return; }
     setSubmitError('');
-    if (!bidAmount || bidAmount <= 0) { setSubmitError('Please enter a bid amount.'); return; }
+    if (ignoreZeroBids && (!bidAmount || bidAmount <= 0)) { setSubmitError('Please enter a bid amount.'); return; }
     if (lastBidAmount > 0 && bidAmount < lastBidAmount) { setSubmitError(`Bid must be at least £${lastBidAmount} (your previous bid).`); return; }
     setSubmitting(true);
     try {
@@ -710,7 +720,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/icon/icon.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -923,11 +933,10 @@ const BidFlow: React.FC = () => {
           {groupBidsOpen && (
             <div className="bf-group-bids-list">
               {roundBids.map((b, i) => (
-                <div key={i} className={`bf-bid-row ${b.is_minimum?'bf-bid-row--min':''} ${b.is_you?'bf-bid-row--you':''}`}>
-                  <div className={`bf-bid-avatar ${b.is_you?'bf-bid-avatar--you':b.is_minimum?'bf-bid-avatar--min':''}`}>{b.initial}</div>
+                <div key={i} className={`bf-bid-row ${b.is_you?'bf-bid-row--you':''}`}>
+                  <div className={`bf-bid-avatar ${b.is_you?'bf-bid-avatar--you':''}`}>{b.initial}</div>
                   <span className="bf-bid-name">{b.is_you ? 'You' : b.pseudonym}</span>
-                  <span className={`bf-bid-amount ${b.is_minimum?'bf-bid-amount--min':''}`}>£{b.amount}</span>
-                  {b.is_minimum && <span className="bf-min-badge">min</span>}
+                  {b.is_you && <span className="bf-bid-amount">£{b.amount}</span>}
                 </div>
               ))}
             </div>
@@ -1114,10 +1123,24 @@ const BidFlow: React.FC = () => {
           <div className="bf-pay-summary-row bf-pay-summary-row--total"><span>Total</span><span>£{paymentTotal}</span></div>
         </div>
         <div style={{ flex: 1 }} />
+        {paymentData?.charity_link && (
+          <iframe
+            src={paymentData.charity_link}
+            title="Charity Payment Page"
+            style={{ width: '100%', border: 'none', borderRadius: 16, marginTop: 16, minHeight: 400 }}
+            onLoad={(e) => {
+              try {
+                const el = e.currentTarget;
+                el.style.height = el.contentWindow?.document?.body?.scrollHeight
+                  ? `${el.contentWindow.document.body.scrollHeight}px`
+                  : '600px';
+              } catch (_) {
+                e.currentTarget.style.height = '600px';
+              }
+            }}
+          />
+        )}
         <div className="bf-pay-form-footer">
-          <div className="bf-pay-redirect-note">
-            <span>We will redirect you to {paymentData?.charity_link ?? 'the charity page'} to complete payment.</span>
-          </div>
           <button className="bf-orange-btn" onClick={handleMarkPaid}>
             Continue <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none"><path d="M4.16699 10H15.8337" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#25201D" strokeWidth="1.6" strokeLinecap="round"/></svg>
           </button>
