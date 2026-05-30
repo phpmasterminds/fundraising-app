@@ -357,3 +357,8 @@
     font-weight: 600;
     color: #2BA7A0;
 }
+.upload-holder
+{
+	text-align:left;
+	cursor:pointer;
+}

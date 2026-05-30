@@ -622,17 +622,18 @@
         box-shadow: 0 4px 12px rgba(43, 167, 160, 0.35);
     }
     
-    .bf-adj-amount {
-        font-size: 48px;
-        font-weight: 500;
-        color: #25201D;
-        min-width: 140px;
-        max-width: 177px;
-        display: flex;
-        text-align: center;
-        letter-spacing: -1px;
-        overflow: hidden;
-    }
+.bf-adj-amount {
+    font-size: 48px;
+    font-weight: 500;
+    color: #25201D;
+    min-width: 140px;
+    max-width: 177px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    letter-spacing: -1px;
+}
     /* Quick chips */
     
     .bf-chips {

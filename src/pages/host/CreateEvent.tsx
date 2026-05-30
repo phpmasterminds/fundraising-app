@@ -177,18 +177,47 @@ const CreateEvent: React.FC = () => {
             </div>
           )}
 
-          {/* Avatar */}
-          <div className="avatar-section">
-            <label className="avatar-circle">
-              {logoPreview ? (
-                <img src={logoPreview} alt="logo" />
-              ) : (
-                <img src="/assets/img/avatar.svg" alt="logo" />
-              )}
-              <input type="file" hidden accept="image/*" onChange={handleLogo} />
-            </label>
-            <span>Choose Event Avatar</span>
-          </div>
+
+       {/* Avatar */}
+<div className="avatar-section">
+
+  <label
+    className="avatar-upload-wrapper"
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      cursor: 'pointer'
+    }}
+  >
+
+    <div className="avatar-circle">
+      {logoPreview ? (
+        <img src={logoPreview} alt="logo" />
+      ) : (
+        <img src="/assets/img/avatar.svg" alt="logo" />
+      )}
+    </div>
+
+    <span
+      style={{
+        color: '#18A0A6',
+        fontWeight: 500
+      }}
+    >
+      Choose Event Avatar
+    </span>
+
+    <input
+      type="file"
+      hidden
+      accept="image/*"
+      onChange={handleLogo}
+    />
+
+  </label>
+
+</div>
 
           {/* Title */}
           <label>Title</label>

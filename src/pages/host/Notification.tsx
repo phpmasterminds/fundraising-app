@@ -69,7 +69,7 @@ const Notification: React.FC = () => {
           {/* ── Shared Header ── */}
           <HostHeader
             variant="back"
-            title="Notification"
+            title="Notifications"
             onBack={() => router.goBack()}
           />
 

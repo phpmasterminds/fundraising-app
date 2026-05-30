@@ -161,7 +161,7 @@ const DonorProfile: React.FC = () => {
           {/* ── Header ── */}
           <DonorHeader
             variant="back"
-            title={!isJoin ? 'User Profile' : undefined}
+            title={!isJoin ? 'Donor Profile' : undefined}
             rightSlot={!isJoin ? <span className="logout">Sign Out</span> : undefined}
             onRightSlotClick={!isJoin ? handleSignOut : undefined}
             onBack={() => router.back()}
@@ -196,14 +196,14 @@ const DonorProfile: React.FC = () => {
               onChange={handleFileChange}
             />
 
-            <div>
-              <span className="upload">
+            <label htmlFor="dp-file" className="upload-holder">
+              <span  className="upload">
                 {uploading ? 'Uploading…' : 'Upload Photo'}
               </span>
               <div className="optional">
                 {uploadError ?? 'Tap to change · JPG, PNG, WEBP'}
               </div>
-            </div>
+            </label>
           </div>
 
           {/* ── Form ── */}
@@ -262,7 +262,7 @@ const DonorProfile: React.FC = () => {
 
             {/* Password — only outside join mode */}
             {!isJoin && (
-				<div className="hp-field">
+				<div className="input-group">
 				  <label className="hp-label">Password</label>
 				  <div className="hp-input-box hp-input-box--action" onClick={openPwModal}>
 					<span className="hp-pw-dots">••••••••</span>
