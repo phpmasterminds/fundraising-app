@@ -50,7 +50,8 @@
 }
 
 .center-icon img {
-    width: 28px;
+	width: 100%;
+    border-radius: 50%;
 }
 
 

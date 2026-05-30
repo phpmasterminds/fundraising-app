@@ -203,7 +203,7 @@ useEffect(() => {
               >
                 <div className={`card-left ${bgClass(event)}`}>
                   {logo
-                    ? <img src={logo} alt={event.name} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
+                    ? <img src={logo} alt={event.name} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} />
                     : <img src="/assets/img/Event1.png" alt="" />
                   }
                 </div>
