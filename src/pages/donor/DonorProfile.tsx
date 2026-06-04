@@ -81,6 +81,16 @@ const DonorProfile: React.FC = () => {
   // ── Email tooltip ─────────────────────────────────
   const [showEmailTip, setShowEmailTip] = useState(false);
 
+const handleEmailInfoClick = () => {
+  setShowEmailTip(true);
+
+  window.clearTimeout((window as any).emailTipTimer);
+
+  (window as any).emailTipTimer = window.setTimeout(() => {
+    setShowEmailTip(false);
+  }, 3000);
+};
+
   const handleRandomName = () => {
     const pick = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
     setDisplayName(pick);
@@ -245,8 +255,7 @@ const DonorProfile: React.FC = () => {
                 <div className="email-tip-wrap">
                   <svg
                     width="16" height="16" viewBox="0 0 24 24" fill="none"
-                    onMouseEnter={() => setShowEmailTip(true)}
-                    onMouseLeave={() => setShowEmailTip(false)}
+                  onClick={handleEmailInfoClick}
                     style={{ cursor: 'default', flexShrink: 0 }}
                   >
                     <path

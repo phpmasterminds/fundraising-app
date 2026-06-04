@@ -530,11 +530,14 @@
         /* border-color: #2BA7A0; */
     }
     
-    .bf-avatar-name {
-        font-size: 12px;
-        font-weight: 400;
-        color: #1A1A2E;
-    }
+  .bf-avatar-name {
+    font-size: 12px;
+    font-weight: 400;
+    color: #1A1A2E;
+    text-align: center;
+    max-width: 100%;
+    overflow: hidden;
+}
     
     .bf-avatar-name--you {
         /* color: #2BA7A0; */

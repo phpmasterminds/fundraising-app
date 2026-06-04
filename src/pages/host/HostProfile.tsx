@@ -35,7 +35,17 @@ const HostProfile: React.FC = () => {
   const [pwError,     setPwError]     = useState<string | null>(null);
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwSuccess,   setPwSuccess]   = useState(false);
+  const [showEmailTip, setShowEmailTip] = useState(false);
 
+const handleEmailInfoClick = () => {
+  setShowEmailTip(true);
+
+  window.clearTimeout((window as any).emailTipTimer);
+
+  (window as any).emailTipTimer = window.setTimeout(() => {
+    setShowEmailTip(false);
+  }, 3000);
+};
   // ── Stats state ───────────────────────────────────────
   const [stats, setStats] = useState<HostStats>({
     events_count: 0,
@@ -164,7 +174,7 @@ const HostProfile: React.FC = () => {
                   )
                 }
               </div>
-            </label>
+            
 
             <input
               type="file"
@@ -182,6 +192,7 @@ const HostProfile: React.FC = () => {
                 {uploadError ?? 'Tap to change · JPG, PNG, WEBP'}
               </span>
             </div>
+            </label>
           </div>
 
           {/* ── Stats Card ── */}
@@ -222,14 +233,22 @@ const HostProfile: React.FC = () => {
               <label className="hp-label">Email Address</label>
               <div className="hp-input-box hp-input-box--readonly">
                 <input value={email} readOnly />
+                <div className="email-tip-wrap">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                   <path
                     d="M12 17V11M12 7H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"
                     stroke="#BDBDBD" strokeWidth="1.8" strokeLinecap="round"
-                  />
+                  onClick={handleEmailInfoClick}
+                 />
                 </svg>
+                           {showEmailTip && (
+  <div className="email-tooltip">
+    Email cannot be changed.
+  </div>
+ 
+)}
               </div>
-              <span className="hp-hint">Email cannot be changed.</span>
+    </div>
             </div>
 
             {/* Display Name */}

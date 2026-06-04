@@ -707,7 +707,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -720,7 +720,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo.png" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -830,11 +830,11 @@ const BidFlow: React.FC = () => {
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
-            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-50)}>
+            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-10)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="#1A1A2E" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
             <span className="bf-adj-amount">£{bidAmount}</span>
-            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(50)}>
+            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(10)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
           </div>
@@ -1127,13 +1127,18 @@ const BidFlow: React.FC = () => {
           <iframe
             src={paymentData.charity_link}
             title="Charity Payment Page"
-            style={{ width: '100%', border: 'none', borderRadius: 16, marginTop: 16, minHeight: 400 }}
+            style={{
+  width: '100%',
+  height: '700px',
+  border: 'none',
+  borderRadius: '16px',
+  marginTop: '16px',
+  display: 'block'
+}}
             onLoad={(e) => {
               try {
                 const el = e.currentTarget;
-                el.style.height = el.contentWindow?.document?.body?.scrollHeight
-                  ? `${el.contentWindow.document.body.scrollHeight}px`
-                  : '600px';
+                el.style.height = '600px';
               } catch (_) {
                 e.currentTarget.style.height = '600px';
               }
