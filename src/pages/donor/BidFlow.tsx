@@ -217,6 +217,16 @@ const BidFlow: React.FC = () => {
       try {
         const res = await getRoundStatus(eventId);
 
+        // Sync ignore_zero_bids so host toggle mid-round is reflected immediately
+        if (res.ignore_zero_bids !== undefined) {
+          setIgnoreZeroBids(res.ignore_zero_bids !== false);
+        } else {
+          // Fallback: re-fetch event detail to pick up the latest toggle
+          getDonorEventDetail(eventId).then(d => {
+            if (d.ignore_zero_bids !== undefined) setIgnoreZeroBids(d.ignore_zero_bids !== false);
+          }).catch(() => {});
+        }
+
         // Host finished the whole event
         if (res.payment_status === 'paid') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
@@ -250,6 +260,7 @@ const BidFlow: React.FC = () => {
         // Host opened the NEXT round while donor is still on bid screens (edge case)
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          setRoundData(null); // clear stale round data before switching
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -419,6 +430,10 @@ const BidFlow: React.FC = () => {
         // Next round opened → transition donor to bid-entry
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
+          setRoundData(null); // clear stale round data before switching
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(null);
+          setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -448,14 +463,21 @@ const BidFlow: React.FC = () => {
           return;
         }
 
+        // Round still open (donor submitted early) — refresh round_bids so group bids update live
+        if (res.round_status === 'open' && res.current_round === currentRound) {
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+          } catch (_) {}
+          return;
+        }
+
         // Round closed/grouping — re-fetch to get matched_amount once grouping completes
         if (res.round_status === 'closed' || res.round_status === 'grouping') {
           try {
             const d = await getCurrentRound(eventId);
-            // Only update if backend now has real matched_amount (grouping done)
-            if (d.matched_amount !== null && d.matched_amount !== undefined) {
-              setRoundData(d);
-            }
+            // Always update round_bids; also update matched_amount once grouping done
+            setRoundData(d);
             if (d.seconds_left !== null && d.seconds_left > 0 && roundCloseSecsLeft === null) {
               setRoundCloseSecsLeft(d.seconds_left);
             }
@@ -500,6 +522,10 @@ const BidFlow: React.FC = () => {
         }
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
+          setRoundData(null); // clear stale round data before switching
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(null);
+          setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -539,6 +565,7 @@ const BidFlow: React.FC = () => {
         const res = await getRoundStatus(eventId);
         if (res.round_status === 'open') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
+          setRoundData(null); // clear stale round data before switching
           // Fetch fresh round data to get correct seconds_left for the new round
           try {
             const d = await getCurrentRound(eventId);
@@ -707,7 +734,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -720,7 +747,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -771,7 +798,10 @@ const BidFlow: React.FC = () => {
                 if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
               }}
               onBlur={() => {
-                if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+                // Enforce minimum on blur — after user finishes typing
+                const n = parseInt(inputVal, 10);
+                if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+                else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
               }}
               inputMode="numeric" style={{ width: `${Math.max(inputVal.length, 1)}ch` }} />
           </div>
@@ -826,15 +856,15 @@ const BidFlow: React.FC = () => {
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
-        <GroupCard myGroup={myGroup} groupSize={groupSize} />
+        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} />
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
-            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-10)}>
+            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="#1A1A2E" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
             <span className="bf-adj-amount">£{bidAmount}</span>
-            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(10)}>
+            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
           </div>
@@ -1127,18 +1157,13 @@ const BidFlow: React.FC = () => {
           <iframe
             src={paymentData.charity_link}
             title="Charity Payment Page"
-            style={{
-  width: '100%',
-  height: '700px',
-  border: 'none',
-  borderRadius: '16px',
-  marginTop: '16px',
-  display: 'block'
-}}
+            style={{ width: '100%', border: 'none', borderRadius: 16, marginTop: 16, minHeight: 400 }}
             onLoad={(e) => {
               try {
                 const el = e.currentTarget;
-                el.style.height = '600px';
+                el.style.height = el.contentWindow?.document?.body?.scrollHeight
+                  ? `${el.contentWindow.document.body.scrollHeight}px`
+                  : '600px';
               } catch (_) {
                 e.currentTarget.style.height = '600px';
               }
@@ -1231,9 +1256,10 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
 
 const AVATAR_PAGE = 4;
 
-const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number }> = ({ myGroup, groupSize }) => {
-  const members = myGroup?.members ?? [];
-  const slotCount = myGroup ? groupSize : Math.min(groupSize, 4);
+const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[] }> = ({ myGroup, groupSize, roundBids = [] }) => {
+  // When group not yet assigned, fall back to round_bids so donors who already bid are visible
+  const members = myGroup?.members ?? (roundBids.length > 0 ? roundBids.map((b: any) => ({ ...b, bid_status: 'submitted' })) : []);
+  const slotCount = myGroup ? groupSize : Math.max(Math.min(groupSize, 4), members.length);
   const slots = Array.from({ length: slotCount }, (_, i) => members[i] ?? null);
 
   // Split slots into pages of 4 for the slider

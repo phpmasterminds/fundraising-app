@@ -228,7 +228,7 @@ useEffect(() => {
           </div>
 
           {/* TITLE */}
-          <h2>{event.name}</h2>
+          <h2 style={{ marginTop: '15px' }}>{event.name}</h2>
 
           <p className="desc">{event.description}</p>
 
