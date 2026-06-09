@@ -287,6 +287,11 @@ const Register: React.FC = () => {
                 />
               </div>
               {fieldErrors.password && <span className="field-error">{fieldErrors.password}</span>}
+              <div className="pw-requirements">
+                <span className={password.length >= 8 ? 'req met' : 'req'}>
+                  {password.length >= 8 ? '✓' : '•'} Minimum 8 characters
+                </span>
+              </div>
             </div>
 
             {/* Confirm Password */}
@@ -314,6 +319,11 @@ const Register: React.FC = () => {
               {fieldErrors.password_confirmation && (
                 <span className="field-error">{fieldErrors.password_confirmation}</span>
               )}
+              <div className="pw-requirements">
+                <span className={confirmPassword.length > 0 && confirmPassword === password ? 'req met' : 'req'}>
+                  {confirmPassword.length > 0 && confirmPassword === password ? '✓' : '•'} Passwords match
+                </span>
+              </div>
             </div>
 
           </div>

@@ -87,7 +87,6 @@ const BidFlow: React.FC = () => {
   const roundTimerRef = useRef<any>(null);
   const waitTimerRef  = useRef<any>(null);
   const pollRef       = useRef<any>(null);
-  const resultsFetchedRef = useRef<boolean>(false); // true once we've fetched final grouped results
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const rafRef        = useRef<number>(0);
   const particles     = useRef<Particle[]>([]);
@@ -431,7 +430,6 @@ const BidFlow: React.FC = () => {
         // Next round opened → transition donor to bid-entry
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
-          resultsFetchedRef.current = false; // reset so next round's results are fetched fresh
           setRoundData(null); // clear stale round data before switching
           setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(null);
@@ -453,23 +451,13 @@ const BidFlow: React.FC = () => {
         // Last round closed → keep polling for finished, don't fetch round data (would overwrite results)
         if (currentRound >= totalRounds) return;
 
-        // Between rounds (waiting) — fetch final grouped results ONCE, then preserve display
+        // Between rounds (waiting) — seed waiting timer, do NOT call getCurrentRound
+        // (getCurrentRound returns next round with nulls, which would wipe the results display)
         if (res.round_status === 'waiting') {
           setRoundCloseSecsLeft(null);
           // Seed waiting timer from server only on first poll (local tick handles decrement)
           if (res.seconds_until_next !== null && res.seconds_until_next !== undefined) {
             setWaitingSecsLeft(prev => (prev === null || prev <= 0) ? res.seconds_until_next : prev);
-          }
-          // Fetch grouped results exactly once — roundData at this point still has
-          // open-round data (group_total: null, all bids unscoped). One getCurrentRound
-          // call after close gives us the final matched_amount, group_total, round_bids.
-          if (!resultsFetchedRef.current) {
-            resultsFetchedRef.current = true;
-            getCurrentRound(eventId).then(d => {
-              if (d.matched_amount !== null && d.matched_amount !== undefined) {
-                setRoundData(d);
-              }
-            }).catch(() => {});
           }
           // Keep polling — do NOT clearInterval, so we catch host launching next round mid-countdown
           return;
@@ -683,8 +671,6 @@ const BidFlow: React.FC = () => {
   const fmt = (s: number) =>
     `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
 
-  const fmtAmount = (n: number) => n.toLocaleString('en-GB');
-
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
   const isLastRound       = currentRound >= totalRounds;
@@ -712,19 +698,9 @@ const BidFlow: React.FC = () => {
 
   // Calculate matched amount live from round_bids when backend hasn't grouped yet.
   // During waiting: backend returns next round data with nulls — use completed round's bid amount.
-  // Scope the live fallback to THIS donor's group, not all round participants: round_bids can
-  // contain every participant, so a global min mis-sets matched for donors not in the lowest group
-  // (e.g. a lone leftover donor would show another group's min). Falls back to global only if no group.
-  const myGroupAmounts = (myGroup?.members ?? [])
-    .map((m: any) => m.is_you
-      ? myBid
-      : (roundBids.find((b: any) => !b.is_you && b.pseudonym === m.pseudonym)?.amount ?? 0))
-    .filter((a: number) => a > 0);
-  const liveMinBid = myGroupAmounts.length > 0
-    ? Math.min(...myGroupAmounts)
-    : roundBids.length > 0
-      ? Math.min(...roundBids.map((b: any) => b.amount))
-      : 0;
+  const liveMinBid = roundBids.length > 0
+    ? Math.min(...roundBids.map((b: any) => b.amount))
+    : 0;
   const matchedAmount = roundData?.matched_amount !== null && roundData?.matched_amount !== undefined
     ? roundData.matched_amount
     : isWaitingStatus && completedRoundBid
@@ -732,7 +708,7 @@ const BidFlow: React.FC = () => {
       : liveMinBid;
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
-    : matchedAmount * actualInGroup; // matched amount x members in group (client rule)
+    : roundBids.reduce((s: number, b: any) => s + (b.amount ?? 0), 0);
   const myCumulative = roundData?.my_cumulative ?? 0;
 
   // displayCumulative: backend my_cumulative already sums all closed rounds' min_amount
@@ -837,18 +813,18 @@ const BidFlow: React.FC = () => {
           <div className="bf-impact-cols">
             <div className="bf-impact-col">
               <span className="bf-ic-label">Potential Match</span>
-              <span className="bf-ic-big">£{fmtAmount(bidAmount)} × {groupSize}</span>
-              <span className="bf-ic-small">= £{fmtAmount(bidAmount * groupSize)} group total</span>
+              <span className="bf-ic-big">£{bidAmount} × {groupSize}</span>
+              <span className="bf-ic-small">= £{bidAmount * groupSize} group total</span>
             </div>
             <div className="bf-impact-col">
               <span className="bf-ic-label">Your Cumulative</span>
-              <span className="bf-ic-big">£{fmtAmount(bidAmount + myCumulative)}</span>
+              <span className="bf-ic-big">£{bidAmount + myCumulative}</span>
               <span className="bf-ic-small">incl. this round</span>
             </div>
           </div>
           <hr className="bf-impact-hr"/>
           <div className="bf-ratio-row"><TrendIcon small /><span className="bf-ratio-label">{matchRatio} ratio match</span></div>
-          <p className="bf-ratio-desc">If £10 is the lowest, the group donates £{fmtAmount(10 * groupSize)} total ({matchRatio} match)</p>
+          <p className="bf-ratio-desc">If £10 is the lowest, the group donates £{10 * groupSize} total ({matchRatio} match)</p>
         </div>
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', marginBottom:8 }}>{submitError}</p>}
         <div className="bf-cta-wrap">
@@ -887,7 +863,7 @@ const BidFlow: React.FC = () => {
             <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="#1A1A2E" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
-            <span className="bf-adj-amount">£{fmtAmount(bidAmount)}</span>
+            <span className="bf-adj-amount">£{bidAmount}</span>
             <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
@@ -910,7 +886,7 @@ const BidFlow: React.FC = () => {
             </div>
           ) : (
             <button className="bf-orange-btn" onClick={handlePlaceBid} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
-              <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${fmtAmount(bidAmount)}`}
+              <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${bidAmount}`}
             </button>
           )}
         </div>
@@ -929,7 +905,7 @@ const BidFlow: React.FC = () => {
           </svg>
         </div>
         <h2 className="bf-sub-title">Bid Submitted!</h2>
-        <p className="bf-sub-desc">Your bid of <strong className="bf-teal">£{fmtAmount(bidAmount)}</strong> has been placed.</p>
+        <p className="bf-sub-desc">Your bid of <strong className="bf-teal">£{bidAmount}</strong> has been placed.</p>
       </div>
     </IonContent></IonPage>
   );
@@ -948,9 +924,9 @@ const BidFlow: React.FC = () => {
         </div>
         <div className="bf-matched-wrap">
           <p className="bf-matched-label">Matched Amount (Per Donor)</p>
-          <p className="bf-matched-val">£{fmtAmount(matchedAmount)}</p>
+          <p className="bf-matched-val">£{matchedAmount}</p>
         </div>
-        <div className="bf-stats3" style={{ alignItems: 'stretch' }}>
+        <div className="bf-stats3">
           <div className="bf-stat3"><TrendIcon /><span className="bf-stat3-val">{matchRatio}</span><span className="bf-stat3-lbl">Match Ratio</span></div>
           <div className="bf-stat3">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -962,18 +938,18 @@ const BidFlow: React.FC = () => {
           </div>
           <div className="bf-stat3">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            <span className="bf-stat3-val">£{fmtAmount(groupTotal)}</span><span className="bf-stat3-lbl">Group Total</span>
+            <span className="bf-stat3-val">£{groupTotal}</span><span className="bf-stat3-lbl">Group Total</span>
           </div>
         </div>
         <div className="bf-card bf-tealbg">
           <p className="bf-card-title">Your Contribution</p>
-          <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{fmtAmount(myBid)}</span></div>
+          <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{myBid}</span></div>
           <div className="bf-card-row">
             <span className="bf-card-lbl">Matched Amount</span>
-            <span className="bf-card-val bf-teal">£{fmtAmount(matchedAmount)}</span>
+            <span className="bf-card-val bf-teal">£{matchedAmount}</span>
           </div>
           {myBid > matchedAmount && matchedAmount > 0 && (
-            <p className="bf-card-note">Your higher bid helped create leverage! The match was set at £{fmtAmount(matchedAmount)} by another donor.</p>
+            <p className="bf-card-note">Your higher bid helped create leverage! The match was set at £{matchedAmount} by another donor.</p>
           )}
         </div>
         <div className="bf-card bf-group-bids-card">
@@ -984,79 +960,27 @@ const BidFlow: React.FC = () => {
               <path d="M6 8l4 4 4-4" stroke="#9AA0A6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
-          {groupBidsOpen && (() => {
-            // myGroup.members is the authoritative scoped membership for this donor's group.
-            // round_bids from the API can contain ALL round participants (unscoped), so we
-            // derive the displayed list from myGroup.members and pull each member's amount
-            // from round_bids by matching. Falls back to round_bids only if no group yet.
-            const groupMembers = myGroup?.members ?? [];
-            const bidsToShow = groupMembers.length > 0
-              ? groupMembers.map((m: any) => {
-                  const match = m.is_you
-                    ? roundBids.find((b: any) => b.is_you)
-                    : roundBids.find((b: any) => !b.is_you && b.pseudonym === m.pseudonym);
-                  return {
-                    pseudonym: m.pseudonym,
-                    initial: m.initial,
-                    amount: m.is_you ? myBid : (match?.amount ?? 0),
-                    is_you: m.is_you,
-                    is_minimum: match?.is_minimum ?? false,
-                  };
-                })
-              : roundBids;
-            // Determine highest and lowest amounts for colour coding
-            const amounts = bidsToShow.map((b: any) => b.amount).filter((a: number) => a > 0);
-            const maxAmt = amounts.length > 0 ? Math.max(...amounts) : -1;
-            const minAmt = amounts.length > 0 ? Math.min(...amounts) : -1;
-            return (
-              <div className="bf-group-bids-list">
-                {bidsToShow.map((b: any, i: number) => {
-                  const isHighest = b.amount > 0 && b.amount === maxAmt;
-                  const isLowest  = b.amount > 0 && b.amount === minAmt && maxAmt !== minAmt;
-                  const avatarStyle: React.CSSProperties = b.is_you
-                    ? {}  // existing --you class handles it
-                    : isHighest
-                      ? { background: '#D4EDDA', color: '#2E7D32', border: '1.5px solid #4CAF50' }
-                      : isLowest
-                        ? { background: '#FDECEA', color: '#C62828', border: '1.5px solid #EF5350' }
-                        : { background: '#FFF3E0', color: '#E65100', border: '1.5px solid #FFA726' };
-                  const rowStyle: React.CSSProperties = b.is_you
-                    ? {}
-                    : isHighest
-                      ? { background: '#F1FAF3' }
-                      : isLowest
-                        ? { background: '#FEF5F5' }
-                        : { background: '#FFFBF5' };
-                  return (
-                    <div key={i} className={`bf-bid-row ${b.is_you ? 'bf-bid-row--you' : ''}`} style={b.is_you ? {} : rowStyle}>
-                      <div className={`bf-bid-avatar ${b.is_you ? 'bf-bid-avatar--you' : ''}`} style={b.is_you ? {} : avatarStyle}>{b.initial}</div>
-                      <span className="bf-bid-name">{b.is_you ? 'You' : b.pseudonym}</span>
-                      {b.is_you && <span className="bf-bid-amount">£{fmtAmount(b.amount)}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
+          {groupBidsOpen && (
+            <div className="bf-group-bids-list">
+              {roundBids.map((b, i) => (
+                <div key={i} className={`bf-bid-row ${b.is_you?'bf-bid-row--you':''}`}>
+                  <div className={`bf-bid-avatar ${b.is_you?'bf-bid-avatar--you':''}`}>{b.initial}</div>
+                  <span className="bf-bid-name">{b.is_you ? 'You' : b.pseudonym}</span>
+                  {b.is_you && <span className="bf-bid-amount">£{b.amount}</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="bf-card bf-card--row bf-card--cumul">
           <div>
-            <p className="bf-card-title bf-card-title--sm">Total You've Bid</p>
-            <p className="bf-card-lbl" style={{ marginTop: 2 }}>Across all rounds · not your payment</p>
+            <p className="bf-card-title bf-card-title--sm">Your Cumulative Total</p>
+            <p className="bf-card-lbl" style={{ marginTop: 2 }}>Including all rounds so far</p>
           </div>
-          <span className="bf-cumul-val">£{fmtAmount(displayCumulative)}</span>
+          <span className="bf-cumul-val">£{displayCumulative}</span>
         </div>
         {currentRound >= totalRounds ? (
           <>
-            {paymentTotal > 0 && (
-              <div className="bf-card bf-card--row bf-card--cumul" style={{ marginTop: 12 }}>
-                <div>
-                  <p className="bf-card-title bf-card-title--sm">Amount to Pay</p>
-                  <p className="bf-card-lbl" style={{ marginTop: 2 }}>Matched amount across all rounds</p>
-                </div>
-                <span className="bf-cumul-val">£{fmtAmount(paymentTotal)}</span>
-              </div>
-            )}
             <p style={{ textAlign:'center', color:'#9AA0A6', fontSize:13, margin:'16px 0 8px' }}>All rounds complete — preparing payment...</p>
             <button className="bf-orange-btn bf-full-btn"
               onClick={() => { getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {}); setScreen('payment-intro'); }}>

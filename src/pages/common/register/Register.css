@@ -219,3 +219,18 @@
     font-size: 12px;
     color: #999;
 }
+.pw-requirements {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.req {
+  font-size: 12px;
+  color: #9ca3af;   /* grey when unmet */
+}
+
+.req.met {
+  color: #2BA7A0;   /* teal tick when satisfied */
+}
