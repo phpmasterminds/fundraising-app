@@ -11,6 +11,9 @@ import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './QrScan.css';
 import { Html5Qrcode } from "html5-qrcode";
 import { getEventByCode } from '../../../services/donorEvents';
+
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 const QrScan: React.FC = () => {
   const router = useIonRouter();
   const { checking } = useAuthRedirect();
@@ -138,24 +141,24 @@ const QrScan: React.FC = () => {
       <IonContent fullscreen className="qr-page">
 
         <div className="qr-header">
-          <div className="back" onClick={() => router.back()}>
-            <img src="/assets/img/Back.svg" alt="Back" />
+          <div className="back"  onClick={() => router.back()}>
+            <img src={`${imgBase}/Back.svg`} alt="Back" />
           </div>
           <h2>Scan QR Code</h2>
         </div>
 
         {Capacitor.getPlatform() === 'web' ? (
-          <div className="web-scanner-container">
+          <div className="web-scanner-container" style={{ textAlign: 'center' }}>
             <div id="qr-reader"></div>
             <button
               onClick={switchWebCamera}
-              style={{ marginTop: 12, padding: '8px 20px', borderRadius: 65, background: '#2BA7A0', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 14 }}
+              style={{ marginTop: 30, padding: '8px 20px', borderRadius: 65, background: '#2BA7A0', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 14 }}
             >
               Switch Camera
             </button>
           </div>
         ) : (
-          <div className="qr-overlay">
+          <div className="qr-overlay" style={{ textAlign: 'center' }}>
             <div className="qr-frame">
               <div className="corner top-left"></div>
               <div className="corner top-right"></div>
@@ -164,7 +167,7 @@ const QrScan: React.FC = () => {
             </div>
             <button
               onClick={switchNativeCamera}
-              style={{ marginTop: 24, padding: '10px 24px', borderRadius: 65, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }}
+              style={{ marginTop: 30, padding: '10px 24px', borderRadius: 65, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }}
             >
               Switch Camera
             </button>

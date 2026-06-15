@@ -7,6 +7,8 @@ import type { ApiError } from '../../../services/api';
 import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './Register.css';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 const Register: React.FC = () => {
   const router   = useIonRouter();
   const location = useLocation();
@@ -160,7 +162,7 @@ const Register: React.FC = () => {
 
           {/* Back */}
           <div className="back-btn" onClick={() => router.back()}>
-            <img src="/assets/img/Back.svg" alt="back" />
+            <img src={`${imgBase}/Back.svg`} alt="back" />
           </div>
 
           {/* Title */}
@@ -191,7 +193,7 @@ const Register: React.FC = () => {
                   style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
                 />
               ) : (
-                <img src="/assets/img/user.svg" alt="avatar" />
+                <img src={`${imgBase}/user.svg`} alt="avatar" />
               )}
             </div>
             <span>{avatarPreview ? 'Change Photo' : 'Upload Photo'}</span>
@@ -230,7 +232,7 @@ const Register: React.FC = () => {
             <div className="input-group">
               <label>Email Address</label>
               <div className={`input-box ${fieldErrors.email ? 'input-error' : ''}`}>
-                <img src="/assets/img/Email.svg" alt="" />
+                <img src={`${imgBase}/Email.svg`} alt="Email" />
                 <input
                   type="email"
                   placeholder="john@example.com"
@@ -268,7 +270,7 @@ const Register: React.FC = () => {
             <div className="input-group">
               <label>Password</label>
               <div className={`input-box ${fieldErrors.password ? 'input-error' : ''}`}>
-                <img src="/assets/img/Lock.svg" alt="" />
+                <img src={`${imgBase}/Lock.svg`} alt="Lock" />
                 <input
                   type={showPw ? 'text' : 'password'}
                   placeholder="Min 8 characters"
@@ -298,7 +300,7 @@ const Register: React.FC = () => {
             <div className="input-group">
               <label>Re-enter Password</label>
               <div className={`input-box ${fieldErrors.password_confirmation ? 'input-error' : ''}`}>
-                <img src="/assets/img/Lock.svg" alt="" />
+                <img src={`${imgBase}/Lock.svg`} alt="Lock" />
                 <input
                   type={showConfirmPw ? 'text' : 'password'}
                   placeholder="Repeat password"

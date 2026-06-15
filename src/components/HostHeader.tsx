@@ -3,6 +3,8 @@ import { useIonRouter } from '@ionic/react';
 import { storageUrl, getAuthUser } from '../services/storage';
 import './HostHeader.css';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 interface HostHeaderProps {
   variant?: 'main' | 'back';
   title?: string;
@@ -33,20 +35,20 @@ const HostHeader: React.FC<HostHeaderProps> = ({
     return (
       <div className="hh-header hh-main">
         <div className="hh-logo" onClick={onLogoClick}>
-          <img src="/assets/img/logo_bg.svg" alt="logo" />
+          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
           <span>PeerFund</span>
         </div>
 
         <div className="hh-right">
-            <img src="/assets/img/Bell.svg" alt="notifications" className="bell" onClick={() => router.push('/notification')} />
+            <img src={`${imgBase}/Bell.svg`} alt="notifications" className="bell" onClick={() => router.push('/notification')} />
           
             <img
-              src={avatarUrl || '/assets/img/profile.svg'}
+              src={avatarUrl || `${imgBase}/profile.svg`}
               alt="profile"
 			  onClick={() => router.push('/host-profile')}
               className="profile_img"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = '/assets/img/profile.svg';
+                (e.target as HTMLImageElement).src = `${imgBase}/profile.svg`;
               }}
             />
           
@@ -58,7 +60,7 @@ const HostHeader: React.FC<HostHeaderProps> = ({
   return (
     <div className="hh-header hh-back">
       <div className="hh-back-btn" onClick={handleBack}>
-        <img src="/assets/img/Back.svg" alt="back" />
+        <img src={`${imgBase}/Back.svg`} alt="back" />
       </div>
       {title && <div className="hh-title">{title}</div>}
       {rightSlot && <div className="hh-right">{rightSlot}</div>}

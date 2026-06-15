@@ -20,6 +20,7 @@ import 'swiper/css/pagination';
 import { Pagination, EffectCoverflow } from 'swiper/modules';
 import 'swiper/css/effect-coverflow';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 type Screen =
   | 'starting'
@@ -218,15 +219,17 @@ const BidFlow: React.FC = () => {
       try {
         const res = await getRoundStatus(eventId);
 
-        // Sync ignore_zero_bids so host toggle mid-round is reflected immediately
+        // Sync ignore_zero_bids so a host toggle mid-round is reflected without a refresh.
+        // getRoundStatus may omit this field OR return a stale value, so use it as an
+        // immediate hint and ALWAYS reconcile against getDonorEventDetail — the same
+        // authoritative source used on page load (Effect 1). This guarantees the donor
+        // picks up the host toggle on the next poll tick instead of only on refresh.
         if (res.ignore_zero_bids !== undefined) {
           setIgnoreZeroBids(res.ignore_zero_bids !== false);
-        } else {
-          // Fallback: re-fetch event detail to pick up the latest toggle
-          getDonorEventDetail(eventId).then(d => {
-            if (d.ignore_zero_bids !== undefined) setIgnoreZeroBids(d.ignore_zero_bids !== false);
-          }).catch(() => {});
         }
+        getDonorEventDetail(eventId).then(d => {
+          if (d.ignore_zero_bids !== undefined) setIgnoreZeroBids(d.ignore_zero_bids !== false);
+        }).catch(() => {});
 
         // Host finished the whole event
         if (res.payment_status === 'paid') {
@@ -450,8 +453,26 @@ const BidFlow: React.FC = () => {
           return;
         }
 
-        // Last round closed → keep polling for finished, don't fetch round data (would overwrite results)
-        if (currentRound >= totalRounds) return;
+        // Last round: there is no next round or waiting period, so the next-round /
+        // waiting branches below do not apply. But we MUST keep re-fetching round_bids +
+        // my_group so a donor who submitted early still sees later bidders re-form into
+        // their group (the backend regroups as each new donor bids). Without this, the
+        // member count freezes at whatever it was when this donor landed on the results
+        // screen, so a 3rd donor who bids afterwards never appears for the first two.
+        // The 'finished' check above still moves us to payment once the event ends, so
+        // here the round is only ever open / closing — safe to refresh.
+        if (currentRound >= totalRounds) {
+          if (res.round_status === 'open' || res.round_status === 'closed' || res.round_status === 'grouping') {
+            try {
+              const d = await getCurrentRound(eventId);
+              setRoundData(d);
+              if (d.seconds_left !== null && d.seconds_left > 0 && roundCloseSecsLeft === null) {
+                setRoundCloseSecsLeft(d.seconds_left);
+              }
+            } catch (_) {}
+          }
+          return;
+        }
 
         // Between rounds (waiting) — fetch final grouped results ONCE, then preserve display
         if (res.round_status === 'waiting') {
@@ -549,6 +570,22 @@ const BidFlow: React.FC = () => {
           }
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('bid-entry');
+          return;
+        }
+
+        // Still on THIS round's own results (no newer round opened) — keep calling the
+        // AJAX so a donor who landed here first picks up later bidders re-forming into
+        // their group. Without this the member count freezes and a 3rd donor who bids
+        // afterwards never shows up. This is the interval actually running on the last
+        // round's results screen (it shares pollRef and overrides Effect 6 on mount).
+        // Gated to open/closed/grouping (NOT 'waiting') so we never overwrite the display
+        // with next-round nulls the backend returns during the waiting period.
+        if (res.current_round === currentRound &&
+            (res.round_status === 'open' || res.round_status === 'closed' || res.round_status === 'grouping')) {
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+          } catch (_) {}
         }
       } catch (_) {}
     }, 3000);
@@ -563,6 +600,13 @@ const BidFlow: React.FC = () => {
       try {
         const d = await getCurrentRound(eventId);
         setRoundData(d);
+        // Reconcile ignore_zero_bids on this screen too. confirm-bid is served by THIS
+        // poll (getCurrentRound) — the getRoundStatus poll in Effect 3b is cleared here
+        // because both share pollRef. Without this, a host toggle is only picked up on
+        // refresh, so the "Please enter a bid amount." error keeps blocking £0 bids.
+        getDonorEventDetail(eventId).then(ev => {
+          if (ev.ignore_zero_bids !== undefined) setIgnoreZeroBids(ev.ignore_zero_bids !== false);
+        }).catch(() => {});
       } catch (_) {}
     }, 5000);
     return () => clearInterval(pollRef.current);
@@ -685,6 +729,17 @@ const BidFlow: React.FC = () => {
 
   const fmtAmount = (n: number) => n.toLocaleString('en-GB');
 
+  // Bid input sizing: keep the editable amount inside its slot so long numbers never
+  // overflow into the +/- steppers. Width is measured from the COMMA-FORMATTED string
+  // (grouping separators counted), and once the value passes a comfortable character
+  // budget the font scales down. Because the width is in `ch` (relative to the input's
+  // OWN font-size), shrinking the font keeps the pixel width bounded while every digit
+  // stays visible. Used by both the bid-entry and the live-adjust inputs.
+  const bidDisplay = inputVal === '0' ? '0' : Number(inputVal.replace(/,/g, '') || 0).toLocaleString('en-GB');
+  const bidLen     = Math.max(bidDisplay.length, 1);
+  const BID_FIT    = 6;                                    // chars that fit at full size
+  const bidScale   = bidLen > BID_FIT ? BID_FIT / bidLen : 1;
+
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
   const isLastRound       = currentRound >= totalRounds;
@@ -699,6 +754,16 @@ const BidFlow: React.FC = () => {
   const myBid      = isWaitingStatus && completedRoundBid
     ? completedRoundBid.amount
     : (roundData?.my_bid ?? bidAmount);
+  // Whether THIS donor actually placed a bid in the round being shown. Drives the
+  // "No bids placed by you" message on the results + payment screens. Prefer an explicit
+  // backend flag (my_bid_placed); otherwise infer — a placed bid means my_bid is a real
+  // value (null/undefined = no bid), and during the between-rounds 'waiting' status the
+  // completed round's entry in all_round_bids tells us whether they bid that round.
+  const myBidPlaced = (roundData as any)?.my_bid_placed !== undefined
+    ? !!(roundData as any).my_bid_placed
+    : isWaitingStatus
+      ? !!completedRoundBid
+      : (roundData?.my_bid !== null && roundData?.my_bid !== undefined);
   const myGroup    = roundData?.my_group  ?? null;
   const groupSize  = roundData?.group_size ?? 4;
   const matchRatio = roundData?.match_ratio ?? '1:3';
@@ -758,7 +823,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -771,7 +836,7 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
         </div>
         <span className="bf-loading-label">PeerFund</span>
       </div>
@@ -815,19 +880,20 @@ const BidFlow: React.FC = () => {
           <p className="bf-amount-hint">Type your bid{lastBidAmount > 0 ? ` (min £${lastBidAmount})` : ''}</p>
           <div className="bf-amount-display">
             <span className="bf-pound">£</span>
-            <input className="bf-amount-input" type="number" value={inputVal}
-              onChange={e => {
-                setInputVal(e.target.value);
-                const n = parseInt(e.target.value, 10);
-                if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
-              }}
-              onBlur={() => {
-                // Enforce minimum on blur — after user finishes typing
-                const n = parseInt(inputVal, 10);
-                if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
-                else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
-              }}
-              inputMode="numeric" style={{ width: `${Math.max(inputVal.length, 1)}ch` }} />
+				<input className="bf-amount-input" type="text" value={bidDisplay}
+			  onChange={e => {
+				const raw = e.target.value.replace(/,/g, '');
+				if (raw !== '' && !/^\d+$/.test(raw)) return;
+				setInputVal(raw);
+				const n = parseInt(raw, 10);
+				if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
+			  }}
+			  onBlur={() => {
+				const n = parseInt(inputVal.replace(/,/g, ''), 10);
+				if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+				else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+			  }}
+			  inputMode="numeric" style={{ flexShrink:0, fontSize: bidScale < 1 ? `${bidScale}em` : undefined, width: `${bidLen}ch` }} />
           </div>
           <p className="bf-amount-sub">Enter your preferred bid amount</p>
         </div>
@@ -880,14 +946,33 @@ const BidFlow: React.FC = () => {
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
-        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} />
+        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} myBid={myBid} />
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
             <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="#1A1A2E" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
-            <span className="bf-adj-amount">£{fmtAmount(bidAmount)}</span>
+            <span className="bf-adj-amount" style={{ flexShrink: 0 }}>£<input
+              type="text"
+              className="bf-adj-amount-input"
+              value={bidDisplay}
+              onChange={e => {
+                const raw = e.target.value.replace(/,/g, '');
+                if (raw !== '' && !/^\d+$/.test(raw)) return; // digits only — block any characters
+                setInputVal(raw);
+                const n = parseInt(raw, 10);
+                if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
+              }}
+              onBlur={() => {
+                const n = parseInt(inputVal.replace(/,/g, ''), 10);
+                if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+                else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+              }}
+              inputMode="numeric"
+              aria-label="Your bid amount"
+              style={{ border:'none', outline:'none', background:'transparent', font:'inherit', color:'inherit', textAlign:'center', padding:0, flexShrink:0, fontSize: bidScale < 1 ? `${bidScale}em` : undefined, minWidth:'1ch', width:`${bidLen}ch` }}
+            /></span>
             <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(50)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
@@ -942,13 +1027,22 @@ const BidFlow: React.FC = () => {
       <canvas ref={canvasRef} className="bf-canvas" />
       <div className="bf-results-wrap">
         <div className="bf-hero">
-          <div className="bf-hero-trophy"><img src="/assets/img/trophy.svg" alt="" /></div>
+          <div className="bf-hero-trophy"><img src={`${imgBase}/trophy.svg`} alt="" /></div>
           <h2 className="bf-hero-title">Round {currentRound} Complete!</h2>
           <p className="bf-hero-sub">{myGroup ? `${myGroup.name} results are in` : 'Results are in'}</p>
         </div>
         <div className="bf-matched-wrap">
-          <p className="bf-matched-label">Matched Amount (Per Donor)</p>
-          <p className="bf-matched-val">£{fmtAmount(matchedAmount)}</p>
+          {myBidPlaced ? (
+            <>
+              <p className="bf-matched-label">Matched Amount (Per Donor)</p>
+              <p className="bf-matched-val">£{fmtAmount(matchedAmount)}</p>
+            </>
+          ) : (
+            <>
+              <p className="bf-matched-label">Your Bid</p>
+              <p className="bf-matched-val" style={{ fontSize: 26, lineHeight: 1.3 }}>No bids placed</p>
+            </>
+          )}
         </div>
         <div className="bf-stats3" style={{ alignItems: 'stretch' }}>
           <div className="bf-stat3"><TrendIcon /><span className="bf-stat3-val">{matchRatio}</span><span className="bf-stat3-lbl">Match Ratio</span></div>
@@ -961,19 +1055,25 @@ const BidFlow: React.FC = () => {
             <span className="bf-stat3-val">{actualInGroup}</span><span className="bf-stat3-lbl">In Group</span>
           </div>
           <div className="bf-stat3">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
             <span className="bf-stat3-val">£{fmtAmount(groupTotal)}</span><span className="bf-stat3-lbl">Group Total</span>
           </div>
         </div>
         <div className="bf-card bf-tealbg">
           <p className="bf-card-title">Your Contribution</p>
-          <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{fmtAmount(myBid)}</span></div>
-          <div className="bf-card-row">
-            <span className="bf-card-lbl">Matched Amount</span>
-            <span className="bf-card-val bf-teal">£{fmtAmount(matchedAmount)}</span>
-          </div>
-          {myBid > matchedAmount && matchedAmount > 0 && (
-            <p className="bf-card-note">Your higher bid helped create leverage! The match was set at £{fmtAmount(matchedAmount)} by another donor.</p>
+          {myBidPlaced ? (
+            <>
+              <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{fmtAmount(myBid)}</span></div>
+              <div className="bf-card-row">
+                <span className="bf-card-lbl">Matched Amount</span>
+                <span className="bf-card-val bf-teal">£{fmtAmount(matchedAmount)}</span>
+              </div>
+              {myBid > matchedAmount && matchedAmount > 0 && (
+                <p className="bf-card-note">Your higher bid helped create leverage! The match was set at £{fmtAmount(matchedAmount)} by another donor.</p>
+              )}
+            </>
+          ) : (
+            <p className="bf-card-note" style={{ marginTop: 4 }}>No bids placed by you this round.</p>
           )}
         </div>
         <div className="bf-card bf-group-bids-card">
@@ -1013,25 +1113,21 @@ const BidFlow: React.FC = () => {
                 {bidsToShow.map((b: any, i: number) => {
                   const isHighest = b.amount > 0 && b.amount === maxAmt;
                   const isLowest  = b.amount > 0 && b.amount === minAmt && maxAmt !== minAmt;
-                  const avatarStyle: React.CSSProperties = b.is_you
-                    ? {}  // existing --you class handles it
-                    : isHighest
-                      ? { background: '#D4EDDA', color: '#2E7D32', border: '1.5px solid #4CAF50' }
+                  const avatarStyle: React.CSSProperties = isHighest
+                      ? { background: 'teal', color: '#fff', border: '1.5px solid #4CAF50' }
                       : isLowest
-                        ? { background: '#FDECEA', color: '#C62828', border: '1.5px solid #EF5350' }
-                        : { background: '#FFF3E0', color: '#E65100', border: '1.5px solid #FFA726' };
-                  const rowStyle: React.CSSProperties = b.is_you
-                    ? {}
-                    : isHighest
-                      ? { background: '#F1FAF3' }
+                        ? { background: '#EF5350', color: '#fff', border: '1.5px solid #EF5350' }
+                        : {};
+                  const rowStyle: React.CSSProperties = isHighest
+                      ? { background: '#EAF6F5' , border: '2px solid #2BA7A0' }
                       : isLowest
-                        ? { background: '#FEF5F5' }
-                        : { background: '#FFFBF5' };
+                        ? { background: '#FEF2F2' , border: '2px solid #D77F5A' }
+                        : {};
                   return (
-                    <div key={i} className={`bf-bid-row ${b.is_you ? 'bf-bid-row--you' : ''}`} style={b.is_you ? {} : rowStyle}>
-                      <div className={`bf-bid-avatar ${b.is_you ? 'bf-bid-avatar--you' : ''}`} style={b.is_you ? {} : avatarStyle}>{b.initial}</div>
+                    <div key={i} className="bf-bid-row" style={rowStyle}>
+                      <div className="bf-bid-avatar" style={avatarStyle}>{b.initial}</div>
                       <span className="bf-bid-name">{b.is_you ? 'You' : b.pseudonym}</span>
-                      {b.is_you && <span className="bf-bid-amount">£{fmtAmount(b.amount)}</span>}
+                      <span className="bf-bid-amount">£{fmtAmount(b.amount)}</span>
                     </div>
                   );
                 })}
@@ -1167,7 +1263,7 @@ const BidFlow: React.FC = () => {
           </div>
           <h2 className="bf-pay-intro-title">Thank you, <strong>{paymentData?.donor_name ?? myPseudonym}</strong></h2>
           <p className="bf-pay-intro-sub">The event has concluded. Your final pledge is:</p>
-          <p className="bf-pay-intro-amount">£{paymentTotal}</p>
+          <p className="bf-pay-intro-amount">£{Number(paymentTotal).toLocaleString('en-GB')}</p>
           <div className="bf-carousel" style={{ width:'100%' }}>
             {paymentSlideImages.length > 0 && (
               <Swiper modules={[Pagination, EffectCoverflow]} effect="coverflow" grabCursor centeredSlides slidesPerView="auto"
@@ -1215,18 +1311,28 @@ const BidFlow: React.FC = () => {
         </div>
         <div className="bf-pay-summary-card">
           <p className="bf-pay-summary-label">Your Total Donation</p>
-          <p className="bf-pay-summary-amount">£{paymentTotal}</p>
+          <p className="bf-pay-summary-amount">£{Number(paymentTotal).toLocaleString('en-GB')}</p>
           <p className="bf-pay-summary-desc">Based on matched minimum bids across all rounds</p>
           <div className="bf-pay-summary-divider" />
-          {(paymentData?.rounds_detail ?? []).map((r, i: number) => (
-            <div key={i} className="bf-pay-summary-row">
-              <span className="bf-pay-summary-row-lbl">Round {r.round}</span>
-              <span className="bf-pay-summary-row-val">£{r.matched}</span>
-            </div>
-          ))}
+			{(paymentData?.rounds_detail ?? []).map((r, i: number) => {
+			  // A round the donor never bid in shows "No bids placed" instead of an amount.
+			  // Prefer an explicit backend flag (bid_placed / my_bid); else infer from matched.
+			  const rr = r as any;
+			  const placed = rr.bid_placed !== undefined
+			    ? !!rr.bid_placed
+			    : (rr.my_bid !== undefined && rr.my_bid !== null)
+			      ? Number(rr.my_bid) > 0
+			      : (rr.matched !== null && rr.matched !== undefined && Number(rr.matched) > 0);
+			  return (
+			  <div key={i} className="bf-pay-summary-row">
+				<span className="bf-pay-summary-row-lbl">Round {r.round}</span>
+				<span className="bf-pay-summary-row-val">{placed ? `£${Number(r.matched).toLocaleString('en-GB')}` : 'No bids placed'}</span>
+			  </div>
+			  );
+			})}
           <div className="bf-pay-summary-row"><span className="bf-pay-summary-row-lbl">Processing fee</span><span className="bf-pay-summary-row-val bf-teal1">Free</span></div>
           <div className="bf-pay-summary-divider" />
-          <div className="bf-pay-summary-row bf-pay-summary-row--total"><span>Total</span><span>£{paymentTotal}</span></div>
+          <div className="bf-pay-summary-row bf-pay-summary-row--total"><span>Total</span><span>£{Number(paymentTotal).toLocaleString('en-GB')}</span></div>
         </div>
         <div style={{ flex: 1 }} />
         {paymentData?.charity_link && (
@@ -1274,7 +1380,7 @@ const BidFlow: React.FC = () => {
             <span className="bf-receipt-card-title">Donation Receipt</span>
           </div>
           {[
-            { label: 'Amount',    val: `£${paymentTotal}`, teal: true },
+            { label: 'Amount',    val: `£${Number(paymentTotal).toLocaleString('en-GB')}`, teal: true },
             { label: 'Charity',   val: paymentData?.charity_name ?? '—' },
             { label: 'Event',     val: paymentData?.event_name   ?? eventName },
             { label: 'Donor',     val: paymentData?.donor_name   ?? myPseudonym },
@@ -1332,34 +1438,108 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
 
 const AVATAR_PAGE = 4;
 
-const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[] }> = ({ myGroup, groupSize, roundBids = [] }) => {
+const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number }> = ({ myGroup, groupSize, roundBids = [], myBid = 0 }) => {
   // When group not yet assigned, fall back to round_bids so donors who already bid are visible
   const members = myGroup?.members ?? (roundBids.length > 0 ? roundBids.map((b: any) => ({ ...b, bid_status: 'submitted' })) : []);
   const slotCount = myGroup ? groupSize : Math.max(Math.min(groupSize, 4), members.length);
   const slots = Array.from({ length: slotCount }, (_, i) => members[i] ?? null);
 
-  // Split slots into pages of 4 for the slider
-  const pages: (typeof slots)[] = [];
-  for (let i = 0; i < slots.length; i += AVATAR_PAGE) {
-    pages.push(slots.slice(i, i + AVATAR_PAGE));
-  }
-  const needsSlider = slots.length > AVATAR_PAGE;
+  // Responsive: fewer cards per view on smaller screens → wider slides that read clearly.
+  //   < 380px (small phones)  → 2 cards  (widest)
+  //   380–479px (most phones) → 3 cards
+  //   >= 480px (large/tablet) → AVATAR_PAGE (4)
+  const calcPerView = (w: number) => (w < 380 ? 2 : w < 480 ? 3 : AVATAR_PAGE);
+  const [perView, setPerView] = useState<number>(typeof window !== 'undefined' ? calcPerView(window.innerWidth) : AVATAR_PAGE);
+  useEffect(() => {
+    const onResize = () => setPerView(calcPerView(window.innerWidth));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Resolve each member's bid amount from round_bids (members from my_group carry no amount).
+  const fmtAmt = (n: number) => n.toLocaleString('en-GB');
+  const amountOf = (m: any): number => {
+    if (!m) return 0;
+    if (m.is_you) {
+      const youMatch = roundBids.find((b: any) => b.is_you);
+      return Number(youMatch?.amount ?? m.amount ?? m.bid_amount ?? myBid ?? 0) || 0;
+    }
+    const match = roundBids.find((b: any) => !b.is_you && b.pseudonym === m.pseudonym);
+    return Number(match?.amount ?? m.amount ?? m.bid_amount ?? 0) || 0;
+  };
+
+  // Rank colour for the logged-in user's own cell.
+  // Comparison pool must include EVERY available signal: the submitted round_bids,
+  // the displayed members' amounts, AND the logged-in user's own in-progress bid.
+  // round_bids alone omits the user's bid until they hit "Submitted", which mis-ranked
+  // "You" — a lowest bid showed amber instead of red, and a highest bid showed no colour.
+  // Including amountOf({ is_you: true }) (falls back to the live myBid) fixes both.
+  // Exact fills sampled from the Figma "You" cell: green #27A99F, amber #FCB13E, red #F6494D.
+  const rankPool = [
+    ...roundBids.map((b: any) => Number(b.amount) || 0),
+    ...members.map(amountOf),
+    amountOf({ is_you: true }),
+  ].filter((a: number) => a > 0);
+  const maxAmt = rankPool.length ? Math.max(...rankPool) : -1;
+  const minAmt = rankPool.length ? Math.min(...rankPool) : -1;
+  const youRankColor = (m: any): string | null => {
+    const amt = amountOf(m);
+    if (amt <= 0 || maxAmt === minAmt) return null;
+    if (amt === maxAmt) return '#27A99F'; // highest → green
+    if (amt === minAmt) return '#F6494D'; // lowest  → red
+    return '#FCB13E';                     // middle  → amber
+  };
+
+  // ★ NEW: tint the whole card to match the logged-in user's rank (light fills from Figma)
+  const youMember = members.find((m: any) => m?.is_you) ?? roundBids.find((b: any) => b.is_you) ?? null;
+  const youCardColor = youMember ? youRankColor(youMember) : null;
+  const cardTint =
+    youCardColor === '#27A99F' ? '#EAF6F6' :   // green
+    youCardColor === '#FCB13E' ? '#FFF8F0' :   // amber
+    youCardColor === '#F6494D' ? '#FFF2F2' :   // red
+    undefined;
+
+  // Use a swiper whenever there are more cards than fit comfortably in one view
+  const needsSlider = slots.length > perView;
 
   const renderAvatarCol = (m: any, i: number) => {
     const isYou = m?.is_you ?? false;
+    const youColor = isYou ? youRankColor(m) : null;
+    const amt = amountOf(m);
     const name  = isYou ? 'You' : (m?.pseudonym ?? '?');
     const emoji = m?.emoji ?? null;
     const initial = m?.initial ?? '?';
     const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
+    // Mobile polish: equal-height cells; filled member cells read as white cards (Figma look)
+    const colStyle: React.CSSProperties = {
+      height: '100%',
+      justifyContent: 'flex-start',
+      ...(youColor
+        ? { background: youColor, borderColor: youColor }
+        : m
+          ? { background: '#fff', borderColor: '#EFF1F4' }
+          : { background: 'transparent' }),
+    };
+    const nameStyle: React.CSSProperties = {
+      width: '100%',
+      whiteSpace: 'normal',
+      overflowWrap: 'break-word',
+      wordBreak: 'normal',
+      lineHeight: 1.2,
+      ...(youColor ? { color: '#fff' } : null),
+    };
     return (
-      <div key={i} className={`bf-avatar-col ${isYou ? 'bf-avatar-box--you' : ''}`}>
-        <div className="bf-avatar-box">
+      <div key={i} className={`bf-avatar-col ${isYou ? 'bf-avatar-box--you' : ''}`} style={colStyle}>
+        <div className="bf-avatar-box" style={youColor ? { background: '#fff', borderRadius: '50%' } : undefined}>
           {emoji ? <span className="bf-avatar-em">{emoji}</span>
             : <span className="bf-avatar-em" style={{ fontSize:18, fontWeight:600 }}>{m ? initial : '—'}</span>}
         </div>
-        <span className={`bf-avatar-name ${isYou ? 'bf-avatar-name--you' : ''}`}>{m ? name : '...'}</span>
-        <span className="bf-avatar-status">{m ? status : ''}</span>
-        <div className="bf-avatar-dots">
+        <span className={`bf-avatar-name ${isYou ? 'bf-avatar-name--you' : ''}`} style={nameStyle}>{m ? name : '...'}</span>
+        <span className="bf-avatar-status" style={youColor ? { color: 'rgba(255,255,255,0.85)' } : undefined}>{m ? status : ''}</span>
+        {m && amt > 0 && (
+          <span style={{ fontSize: 13, fontWeight: 700, marginTop: 2, color: youColor ? '#fff' : '#1A1A2E' }}>£{fmtAmt(amt)}</span>
+        )}
+        <div className="bf-avatar-dots" style={{ marginTop: 'auto', paddingTop: 6 }}>
           <span className={`bf-avatar-dot ${m ? 'bf-avatar-dot--on' : ''}`} />
           <span className="bf-avatar-dot" /><span className="bf-avatar-dot" />
         </div>
@@ -1368,7 +1548,7 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
   };
 
   return (
-    <div className="bf-group-card">
+    <div className="bf-group-card" style={cardTint ? { background: cardTint } : undefined}>{/* ★ NEW: style */}
       <div className="bf-gc-top">
         <div className="bf-gc-label-row">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -1385,20 +1565,16 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
         <Swiper
           modules={[Pagination]}
           pagination={{ clickable: true }}
-          spaceBetween={0}
-          slidesPerView={1}
+          spaceBetween={8}
+          slidesPerView={perView}
           style={{ width: '100%', paddingBottom: 16 }}
         >
-          {pages.map((page, pi) => (
-            <SwiperSlide key={pi}>
-              <div className="bf-avatars">
-                {page.map((m, i) => renderAvatarCol(m, pi * AVATAR_PAGE + i))}
-              </div>
-            </SwiperSlide>
+          {slots.map((m, i) => (
+            <SwiperSlide key={i}>{renderAvatarCol(m, i)}</SwiperSlide>
           ))}
         </Swiper>
       ) : (
-        <div className="bf-avatars">
+        <div className="bf-avatars" style={{ gridTemplateColumns: `repeat(${Math.max(slots.length, 1)}, 1fr)` }}>
           {slots.map((m, i) => renderAvatarCol(m, i))}
         </div>
       )}
@@ -1407,7 +1583,7 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
 };
 
 const TrendIcon: React.FC<{ small?: boolean }> = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+  <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
     <path d="M14.6663 4.66663L8.99967 10.3333L5.66634 6.99996L1.33301 11.3333" stroke="#16837E" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
     <path d="M10.667 4.66663H14.667V8.66663" stroke="#16837E" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>

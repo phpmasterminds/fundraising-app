@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'io.ionic.starter',
-  appName: 'fundraising-app',
+  appId: 'com.peerfund.app',
+  appName: 'PeerFund',
   webDir: 'dist'
 };
 

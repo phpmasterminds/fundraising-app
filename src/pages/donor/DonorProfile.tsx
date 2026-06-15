@@ -15,6 +15,7 @@ const RANDOM_NAMES = [
   'Brave Panda', 'Silent Fox', 'Cosmic Bear', 'Lucky Tiger',
   'Noble Wolf', 'Swift Eagle', 'Calm Otter', 'Wild Lynx',
 ];
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 const DonorProfile: React.FC = () => {
 
@@ -208,7 +209,7 @@ const handleEmailInfoClick = () => {
               <div className="avatar">
                 {avatarUrl
                   ? <img src={avatarUrl} className="preview" alt="avatar" />
-                  : <img src="/assets/img/user.svg" alt="placeholder" />
+                  : <img src={`${imgBase}/user.svg`} alt="User" />
                 }
               </div>
             </label>

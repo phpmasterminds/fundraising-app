@@ -2,6 +2,8 @@ import { useIonRouter } from '@ionic/react';
 import './DonorHeader.css';
 import { storageUrl, getAuthUser } from '../services/storage';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 interface DonorHeaderProps {
   /** 'main'  → logo + username (DEventList style)
    *  'back'  → back button + optional title + optional right slot */
@@ -51,18 +53,18 @@ const DonorHeader: React.FC<DonorHeaderProps> = ({
     return (
       <div className="dh-header dh-main">
         <div className="dh-logo">
-          <img src="/assets/img/logo_bg.svg" alt="logo" />
+          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
           <span>PeerFund</span>
         </div>
 		<div className="hh-right">
 			{aDisplayName}
             <img
-              src={avatarUrl || '/assets/img/profile.svg'}
+              src={avatarUrl || `${imgBase}/profile.svg`}
               alt="profile"
 			  onClick={() => router.push('/profile')}
               className="profile_img"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = '/assets/img/profile.svg';
+                (e.target as HTMLImageElement).src = `${imgBase}/profile.svg`;
               }}
             />
           
@@ -74,7 +76,7 @@ const DonorHeader: React.FC<DonorHeaderProps> = ({
   return (
     <div className="dh-header dh-back">
       <div className="dh-back-btn" onClick={handleBack}>
-        <img src="/assets/img/Back.svg" alt="back" />
+        <img src={`${imgBase}/Back.svg`} alt="back" />
       </div>
       {title && <div className="dh-title">{title}</div>}
       {rightSlot && <div className="dh-right" onClick={onRightSlotClick}>{rightSlot}</div>}

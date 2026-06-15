@@ -9,6 +9,8 @@ import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import { getEventByCode } from '../../../services/donorEvents';
 import './Join.css';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 const Join: React.FC = () => {
   const router = useIonRouter();
   const { checking } = useAuthRedirect();
@@ -53,7 +55,7 @@ const Join: React.FC = () => {
 
           {/* Logo */}
           <div className="logo-circle">
-            <img src="/assets/img/logo.svg" alt="logo" />
+            <img src={`${imgBase}/logo.svg`} alt="logo" />
           </div>
 
           <h1 className="title">PeerFund</h1>
@@ -68,28 +70,28 @@ const Join: React.FC = () => {
           <div className="card host" onClick={() => goLogin('host')}>
             <div className="left">
               <div className="icon-wrap">
-                <img src="/assets/img/host.svg" />
+                <img src={`${imgBase}/host.svg`} />
               </div>
               <div>
                 <h3>Host</h3>
                 <p>Command center & controls</p>
               </div>
             </div>
-            <img src="/assets/img/arrow-orange.svg" className="arrow" />
+            <img src={`${imgBase}/arrow-orange.svg`} className="arrow" />
           </div>
 
           {/* Donor */}
           <div className="card donor" onClick={() => goLogin('donor')}>
             <div className="left">
               <div className="icon-wrap">
-                <img src="/assets/img/donor.svg" />
+                <img src={`${imgBase}/donor.svg`} alt="donor" />
               </div>
               <div>
                 <h3>Donor</h3>
                 <p>Bid & match with peers</p>
               </div>
             </div>
-            <img src="/assets/img/arrow-teal.svg" className="arrow" />
+            <img src={`${imgBase}/arrow-teal.svg`} className="arrow" />
           </div>
 
           <div className="bottom-section">

@@ -20,6 +20,7 @@ import {
   createGroup,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow } from '../../services/events';
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 /* ── Local types ── */
 interface Donor {
@@ -69,6 +70,7 @@ interface PgaMember {
   amount: string;
   emoji: string;
   selected: boolean;
+  isYou: boolean;         // true only for the logged-in user's own cell
 }
 
 interface PgaGroup {
@@ -378,6 +380,7 @@ const ViewEvent: React.FC = () => {
         amount:        d.bid_amount ?? '—',
         emoji:         d.emoji ?? EMOJI_POOL[(gi * 10 + di) % EMOJI_POOL.length],
         selected:      false,
+        isYou:         !!(d as any).is_you,
       })),
     }));
 
@@ -673,6 +676,74 @@ const ViewEvent: React.FC = () => {
     return                                     { label: 'Waiting', cls: 'badge-waiting' };
   };
 
+  /* ── Bid-rank colour coding (green = highest, red = lowest, orange = middle) ── */
+  const parseAmount = (val?: string | null): number => {
+    if (!val) return 0;
+    const n = Number(String(val).replace(/[^0-9.]/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const groupTotal = (g: Group): number =>
+    g.donors.reduce((sum, d) => sum + parseAmount(d.bid), 0);
+
+  // Rank groups by their total bid amount. Only groups with a total > 0 are ranked;
+  // empty / still-bidding groups stay neutral.
+  const rankedGroupTotals = groups.map(groupTotal).filter(t => t > 0);
+  const maxGroupTotal = rankedGroupTotals.length ? Math.max(...rankedGroupTotals) : -1;
+  const minGroupTotal = rankedGroupTotals.length ? Math.min(...rankedGroupTotals) : -1;
+
+  const getGroupRankStyle = (g: Group): React.CSSProperties => {
+    const total = groupTotal(g);
+    if (total <= 0 || maxGroupTotal === minGroupTotal) return {};
+    if (total === maxGroupTotal) return { background: '#F1FAF3', borderColor: '#4CAF50' };
+    if (total === minGroupTotal) return { background: '#FEF5F5', borderColor: '#EF5350' };
+    return { background: '#FFFBF5', borderColor: '#FFA726' };
+  };
+
+  // Rank donors inside a group by their bid. Only bids > 0 are ranked.
+  const getDonorRankStyle = (donor: Donor, donors: Donor[]): React.CSSProperties => {
+    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    if (amounts.length === 0) return {};
+    const max = Math.max(...amounts);
+    const min = Math.min(...amounts);
+    const amt = parseAmount(donor.bid);
+    if (amt <= 0 || max === min) return {};
+    if (amt === max) return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
+    if (amt === min) return { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D'  };
+    return { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' };
+  };
+
+  // ── Same rank colouring for the Proposed Group Allocations sheet ──
+  // Exact colour codes sampled from the Figma:
+  //   group card tints  → green #E9F7F7, amber #FFF8F0, red #FEF2F2
+  //   member cell fills → green #27A99F, amber #FCB13E, red #F6494D (white text)
+  const pgaGroupTotal = (g: PgaGroup): number =>
+    g.members.reduce((sum, m) => sum + parseAmount(m.amount), 0);
+
+  const getPgaGroupRankStyle = (g: PgaGroup, all: PgaGroup[]): React.CSSProperties => {
+    const totals = all.map(pgaGroupTotal).filter(t => t > 0);
+    if (totals.length === 0) return {};
+    const max = Math.max(...totals);
+    const min = Math.min(...totals);
+    const total = pgaGroupTotal(g);
+    if (total <= 0 || max === min) return {};
+    if (total === max) return { background: '#E9F7F7' };
+    if (total === min) return { background: '#FEF2F2' };
+    return { background: '#FFF8F0' };
+  };
+
+  const getPgaMemberRankColor = (m: PgaMember, members: PgaMember[]): string | null => {
+    const amounts = members.map(x => parseAmount(x.amount)).filter(a => a > 0);
+    if (amounts.length === 0) return null;
+    const max = Math.max(...amounts);
+    const min = Math.min(...amounts);
+    const amt = parseAmount(m.amount);
+    if (amt <= 0 || max === min) return null;
+    if (amt === max) return '#27A99F'; // highest → green
+    if (amt === min) return '#F6494D'; // lowest  → red
+    return '#FCB13E';                  // middle  → amber
+  };
+
   const allDonorGroups = groups.map(g => ({ name: g.name, donors: g.donors }));
   const activeRound    = rounds[activeRoundTab] ?? null;
 
@@ -776,7 +847,7 @@ const ViewEvent: React.FC = () => {
           <div className="ve-event-info">
             <div className="ve-stats-row">
               <div className="ve-stat-card" style={{ cursor: 'pointer' }} onClick={() => { closeAll(); setShowLiveSummary(true); }}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M14.6663 4.6665L8.99967 10.3332L5.66634 6.99984L1.33301 11.3332" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
 <path d="M10.667 4.6665H14.667V8.6665" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
@@ -867,7 +938,7 @@ const ViewEvent: React.FC = () => {
               {groups.length > 0 ? (
                 <div className="ve-group-grid">
                   {groups.map((group, i) => (
-                    <div key={i} className={getGroupCardClass(group.status)} onClick={() => setSelectedGroup(group)}>
+                    <div key={i} className={getGroupCardClass(group.status)} style={getGroupRankStyle(group)} onClick={() => setSelectedGroup(group)}>
                       <div className="ve-group-header">
                         <span className="ve-group-name">{group.name}</span>
                         {getStatusIcon(group.status)}
@@ -947,7 +1018,7 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowQR(false)} />
             <div className="ve-sheet ve-sheet--full">
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowQR(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
+                <div className="ve-back-btn" onClick={() => setShowQR(false)}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Setup &amp; QR</span>
                 <div style={{ width: 36 }} />
               </div>
@@ -1008,7 +1079,7 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowAllDonors(false)} />
             <div className="ve-sheet ve-sheet--full">
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowAllDonors(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
+                <div className="ve-back-btn" onClick={() => setShowAllDonors(false)}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
                 <span className="ve-sheet-topbar-title">All Donors</span>
                 <span className="ve-active-badge">{apiEvent?.donors_count ?? 0} Active</span>
               </div>
@@ -1054,7 +1125,7 @@ const ViewEvent: React.FC = () => {
             <div className="ve-backdrop" onClick={() => setShowLiveSummary(false)} />
             <div className="ve-sheet ve-sheet--full ve-sheet--white">
               <div className="ve-sheet-topbar ve-sheet-topbar--white">
-                <div className="ve-back-btn" onClick={() => setShowLiveSummary(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
+                <div className="ve-back-btn" onClick={() => setShowLiveSummary(false)}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Live Summary</span>
                 <div style={{ width: 36 }} />
               </div>
@@ -1157,7 +1228,7 @@ const ViewEvent: React.FC = () => {
               </div>
               <div className="ve-donor-list">
                 {selectedGroup.donors.map((donor, i) => (
-                  <div key={i} className="ve-donor-row">
+                  <div key={i} className="ve-donor-row" style={getDonorRankStyle(donor, selectedGroup.donors)}>
                     <div className="ve-donor-avatar" style={{ background: donor.color }}>{donor.initial}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span><span className="ve-donor-sub">{donor.sub}</span></div>
                     <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
@@ -1182,7 +1253,7 @@ const ViewEvent: React.FC = () => {
 
               {/* Top bar */}
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowPGA(false)}><img src="/assets/img/Back.svg" alt="back" /></div>
+                <div className="ve-back-btn" onClick={() => setShowPGA(false)}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Proposed Group Allocations</span>
                 <div style={{ width: 36 }} />
               </div>
@@ -1205,7 +1276,7 @@ const ViewEvent: React.FC = () => {
                 {pgaGroups.map(group => {
                   const selectedCount = group.members.filter(m => m.selected).length;
                   return (
-                    <div key={group.id} className="ve-pga-group-card">
+                    <div key={group.id} className="ve-pga-group-card" style={getPgaGroupRankStyle(group, pgaGroups)}>
                       {/* Group header */}
                       <div className="ve-pga-group-header">
                         <div className="ve-pga-group-left">
@@ -1226,13 +1297,16 @@ const ViewEvent: React.FC = () => {
                       {group.expanded && (
                         <div className="ve-pga-group-body">
                           <div className="ve-pga-member-grid">
-                            {group.members.map(member => (
+                            {group.members.map(member => {
+                              const rankColor = (member.isYou && !member.selected) ? getPgaMemberRankColor(member, group.members) : null;
+                              return (
                               <button
                                 key={member.id}
                                 className={`ve-pga-member-cell ${member.selected ? 've-pga-member-cell--selected' : ''}`}
+                                style={rankColor ? { background: rankColor, borderColor: rankColor } : undefined}
                                 onClick={() => pgaToggleMember(group.id, member.id)}
                               >
-                                <div className="ve-pga-avatar-wrap">
+                                <div className="ve-pga-avatar-wrap" style={rankColor ? { background: '#fff', borderRadius: '50%' } : undefined}>
                                   <span className="ve-pga-avatar">{member.emoji}</span>
                                   {member.selected && (
                                     <span className="ve-pga-check">
@@ -1243,10 +1317,11 @@ const ViewEvent: React.FC = () => {
                                     </span>
                                   )}
                                 </div>
-                                <span className="ve-pga-member-name">{member.name}</span>
-                                <span className="ve-pga-member-amount">{member.amount}</span>
+                                <span className="ve-pga-member-name" style={rankColor ? { color: '#fff' } : undefined}>{member.name}</span>
+                                <span className="ve-pga-member-amount" style={rankColor ? { color: 'rgba(255,255,255,0.9)' } : undefined}>{member.amount}</span>
                               </button>
-                            ))}
+                              );
+                            })}
                           </div>
                           <button
                             className="ve-pga-move-btn"

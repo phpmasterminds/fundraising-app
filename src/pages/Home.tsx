@@ -5,9 +5,9 @@ import {
   IonButton
 } from '@ionic/react';
 import './Home.css';
-import logo from '../assets/img/logo.png';
-import host from '../assets/img/host.png';
-import donor from '../assets/img/donor.png';
+
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 const Home: React.FC = () => {
   return (
     <IonPage>
@@ -15,7 +15,7 @@ const Home: React.FC = () => {
 
         {/* Logo */}
         <div className="logo-box">
-          <img src={logo} alt="logo" />
+          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
         </div>
 
         <h1 className="title">PeerFund</h1>
@@ -27,7 +27,7 @@ const Home: React.FC = () => {
 
         {/* Host Card */}
         <div className="card host">
-          <div className="icon-circle"><img src={host} alt="host" /></div>
+          <div className="icon-circle"><img src={`${imgBase}/host.png`} alt="host" /></div>
           <div className="card-text">
             <h3>Host</h3>
             <p>Command center & controls</p>
@@ -37,7 +37,7 @@ const Home: React.FC = () => {
 
         {/* Donor Card */}
         <div className="card donor">
-          <div className="icon-circle"><img src={donor} alt="donor" /></div>
+          <div className="icon-circle"><img src={`${imgBase}/donor.png`} alt="donor" /></div>
           <div className="card-text">
             <h3>Donor</h3>
             <p>Bid & match with peers</p>

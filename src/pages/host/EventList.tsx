@@ -9,6 +9,7 @@ import './EventList.css';
 import HostHeader from '../../components/HostHeader';
 import { getEvents, unlistEvent, logoUrl } from '../../services/events';
 import type { Event, HostEventTab } from '../../services/events';
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 const EventList: React.FC = () => {
   const router = useIonRouter();
@@ -92,12 +93,12 @@ const EventList: React.FC = () => {
             rightSlot={
               <>
                 <img
-                  src="/assets/img/Bell.svg"
+                  src={`${imgBase}/Bell.svg`}
                   className="bell"
                   onClick={() => router.push('/notification')}
                 />
                 <img
-                  src="/assets/img/profile.svg"
+                  src={`${imgBase}/profile.svg`}
                   className="profile_img"
                   onClick={() => router.push('/host-profile')}
                 />
@@ -113,8 +114,8 @@ const EventList: React.FC = () => {
               onClick={() => setActiveTab('unlisted')}
             >
               <img src={activeTab === 'unlisted'
-                ? '/assets/img/unlisted-active.svg'
-                : '/assets/img/unlisted.svg'} />
+                ? `${imgBase}/unlisted-active.svg`
+                : `${imgBase}/unlisted.svg` } />
               Unlisted
             </div>
 
@@ -123,8 +124,8 @@ const EventList: React.FC = () => {
               onClick={() => setActiveTab('upcoming')}
             >
               <img src={activeTab === 'upcoming'
-                ? '/assets/img/upcoming-active.svg'
-                : '/assets/img/upcoming.svg'} />
+                ? `${imgBase}/upcoming-active.svg`
+                : `${imgBase}/upcoming.svg`} />
               Upcoming
             </div>
 
@@ -133,8 +134,8 @@ const EventList: React.FC = () => {
               onClick={() => setActiveTab('finished')}
             >
               <img src={activeTab === 'finished'
-                ? '/assets/img/finished-active.svg'
-                : '/assets/img/finished.svg'} />
+                ? `${imgBase}/finished-active.svg`
+                : `${imgBase}/finished.svg` } />
               Finished
             </div>
 
@@ -167,7 +168,7 @@ const EventList: React.FC = () => {
                 {logoUrl(event.logo) ? (
                   <img src={logoUrl(event.logo)!} alt={event.name} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} />
                 ) : (
-                  <img src="/assets/img/Event1.png" alt="" />
+                  <img src={`${imgBase}/Event1.png`} alt="" />
                 )}
               </div>
 
@@ -185,7 +186,7 @@ const EventList: React.FC = () => {
                         setOpenMenu(openMenu === index ? null : index);
                       }}
                     >
-                      <img src="/assets/img/Option.svg" />
+                      <img src={`${imgBase}/Option.svg`} />
                     </div>
                   )}
 
@@ -209,12 +210,12 @@ const EventList: React.FC = () => {
                 {/* Meta */}
                 <div className="meta">
                   <span>
-                    <img src="/assets/img/users.svg" className="meta-icon" />
+                    <img src={`${imgBase}/users.svg`} className="meta-icon" />
                     {event.donors_count ?? 0} donors
                   </span>
 
                   <span>
-                    <img src="/assets/img/time.svg" className="meta-icon" />
+                    <img src={`${imgBase}/time.svg`} className="meta-icon" />
                     {event.rounds_count} rounds
                   </span>
                 </div>
