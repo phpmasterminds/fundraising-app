@@ -22,7 +22,7 @@
 }
 
 .hh-logo img {
-  width: 20px;
+  width: 50px;
   margin-top: 3px;
 }
 
@@ -45,11 +45,13 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  background: #fff;
+  border-radius: 50%;
 }
 
 .hh-back-btn img {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .hh-title {

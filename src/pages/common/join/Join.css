@@ -17,13 +17,12 @@
 .logo-circle {
     width: 46px;
     height: 46px;
-    background: #F4A43A;
+    background: transparent;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     margin: 40px auto 5px;
-    box-shadow: 0 4px 10px rgba(244, 164, 58, 0.25);
 }
 
 .logo-circle img {
@@ -209,4 +208,12 @@
     bottom: 20px;
     left: 20px;
     right: 20px;
+}
+
+
+/* Keyboard open (input focused): release the pinned bottom bar so it flows
+   normally and the page scrolls, instead of jumping up over the Donor card.
+   Has no effect when the keyboard is closed — original layout unchanged. */
+.container:focus-within .bottom-section {
+    position: static;
 }

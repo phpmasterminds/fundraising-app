@@ -23,7 +23,7 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: #fff;
+    background: #F2F3F5;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -43,7 +43,7 @@
 .ve-icon-btn {
     width: 36px;
     height: 36px;
-    border-radius: 10px;
+    border-radius: 50%;
     background: #fff;
     display: flex;
     align-items: center;
@@ -552,9 +552,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 16px 16px;
-    border-bottom: 1px solid #F1F2F6;
+    padding: 20px 4px 16px;
     margin-bottom: 4px;
+    margin-top: 12px;
 }
 
 .ve-sheet-topbar--white {
@@ -875,11 +875,11 @@
 ══════════════════════════════════ */
 
 .ve-ls-body {
-    padding: 20px 20px 0;
+    padding: 4px 20px 0;
 }
 
 .ve-ls-event-pill {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 6px;
     background: #F2F3F5;
@@ -889,6 +889,9 @@
     font-weight: 500;
     color: #1A1A2E;
     margin-bottom: 16px;
+	width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .ve-ls-event-name {
@@ -903,18 +906,21 @@
     color: #1A1A2E;
     line-height: 1.1;
     margin-bottom: 6px;
+	text-align: center;
 }
 
 .ve-ls-org {
     font-size: 13px;
     color: #9AA0A6;
     margin-bottom: 14px;
+	text-align: center;
 }
 
 .ve-ls-meta {
     display: flex;
     gap: 20px;
     margin-bottom: 28px;
+	justify-content: center;
 }
 
 .ve-ls-meta-item {
@@ -1360,7 +1366,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 0 14px;
+    padding: 14px 8px 14px;
+	margin-bottom:8px;
     border-bottom: 1px solid #F3F4F6;
 }
 

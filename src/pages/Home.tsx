@@ -15,10 +15,10 @@ const Home: React.FC = () => {
 
         {/* Logo */}
         <div className="logo-box">
-          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
+          <img src={`${imgBase}/logo_bg.svg?v=2`} alt="logo" />
         </div>
 
-        <h1 className="title">PeerFund</h1>
+        <h1 className="title">Fundraising</h1>
 
         <p className="subtitle">
           Peer-to-peer fundraising where

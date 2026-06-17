@@ -99,6 +99,10 @@
         color: #ccc;
         text-align: left;
     }
+	.error_optional{
+		font-size: 14px;
+        color: #FF3B30;
+	}
     /* ================= FORM ================= */
     
     .input-group {

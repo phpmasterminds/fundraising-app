@@ -215,7 +215,7 @@ const Register: React.FC = () => {
             <div className="input-group">
               <label>Full Name</label>
               <div className={`input-box ${fieldErrors.name ? 'input-error' : ''}`}>
-                <img src="/assets/img/user.svg" alt="" />
+                <img src={`${imgBase}/user.svg`} alt="" />
                 <input
                   type="text"
                   placeholder="John Doe"
@@ -250,7 +250,7 @@ const Register: React.FC = () => {
             <div className="input-group">
               <label>Display Name <span className="optional">(optional)</span></label>
               <div className="input-box">
-                <img src="/assets/img/user.svg" alt="" />
+                <img src={`${imgBase}/user.svg`} alt="" />
                 <input
                   type="text"
                   placeholder="e.g. BraveLion"
@@ -281,7 +281,7 @@ const Register: React.FC = () => {
                   onInput={handleInputChange}
                 />
                 <img
-                  src="/assets/img/Eye.svg"
+                  src={`${imgBase}/Eye.svg`}
                   className="eye"
                   alt="toggle"
                   onClick={() => setShowPw((v) => !v)}
@@ -311,7 +311,7 @@ const Register: React.FC = () => {
                   onInput={handleInputChange}
                 />
                 <img
-                  src="/assets/img/Eye.svg"
+                  src={`${imgBase}/Eye.svg`}
                   className="eye"
                   alt="toggle"
                   onClick={() => setShowConfirmPw((v) => !v)}

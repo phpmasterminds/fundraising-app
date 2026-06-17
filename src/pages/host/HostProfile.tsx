@@ -188,7 +188,7 @@ const handleEmailInfoClick = () => {
               <span className="hp-avatar-title">
                 {uploading ? 'Uploading…' : 'Profile Photo'}
               </span>
-              <span className="hp-avatar-sub">
+              <span className={`hp-avatar-sub ${uploadError ? 'error_optional' : ''}`}>
                 {uploadError ?? 'Tap to change · JPG, PNG, WEBP'}
               </span>
             </div>

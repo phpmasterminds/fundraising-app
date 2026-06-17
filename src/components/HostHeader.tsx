@@ -35,8 +35,8 @@ const HostHeader: React.FC<HostHeaderProps> = ({
     return (
       <div className="hh-header hh-main">
         <div className="hh-logo" onClick={onLogoClick}>
-          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
-          <span>PeerFund</span>
+          <img src={`${imgBase}/logo_bg.svg?v=2`} alt="logo" />
+          <span>Fundraising</span>
         </div>
 
         <div className="hh-right">

@@ -1,6 +1,7 @@
 import {
   IonPage,
-  IonContent
+  IonContent,
+  IonIcon
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState, useEffect, useRef } from 'react';
@@ -20,6 +21,8 @@ import {
   createGroup,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow } from '../../services/events';
+import { copyOutline, checkmarkOutline } from 'ionicons/icons';
+
 const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 /* ── Local types ── */
@@ -99,6 +102,7 @@ const ViewEvent: React.FC = () => {
   const [showRoundOverview, setShowRoundOverview] = useState(false);
   const [activeRoundTab, setActiveRoundTab]       = useState(0);
   const [actionLoading, setActionLoading]         = useState(false);
+  const [showCallTimeConfirm, setShowCallTimeConfirm] = useState(false); // Call Time end-round confirmation
 
   // ─── Config edit state ────────────────────────────────────────────────────
   const [editName, setEditName]                   = useState('');
@@ -744,7 +748,11 @@ const ViewEvent: React.FC = () => {
     return '#FCB13E';                  // middle  → amber
   };
 
-  const allDonorGroups = groups.map(g => ({ name: g.name, donors: g.donors }));
+  // All Donors sheet reads the full roster (incl. donors still bidding) from
+  // all_donors_grouped; falls back to current grouped donors if absent.
+  const rosterGroups   = (apiEvent as unknown as { all_donors_grouped?: ApiGroup[] } | null)?.all_donors_grouped;
+  const allDonorGroups = (rosterGroups?.length ? mapGroups(rosterGroups) : groups)
+    .map(g => ({ name: g.name, donors: g.donors }));
   const activeRound    = rounds[activeRoundTab] ?? null;
 
   const closeAll = () => {
@@ -763,6 +771,29 @@ const ViewEvent: React.FC = () => {
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
   };
+	
+	const [copiedField, setCopiedField] = useState<string | null>(null);
+
+const handleCopy = async (text: string, field: string) => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopiedField(field);
+    setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 1500);
+  } catch {
+    /* no-op */
+  }
+};
 
   return (
     <IonPage>
@@ -995,7 +1026,7 @@ const ViewEvent: React.FC = () => {
           )}
 
           {apiEvent?.status === 'live' && hasOpenRound && (
-            <div className="ve-call-time-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={handleEndRound}>
+            <div className="ve-call-time-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowCallTimeConfirm(true); }}>
               <span className="ve-call-time-icon">■</span>
               {actionLoading ? 'Ending…' : timerSecs > 0 ? `Call Time (${formatTimer(timerSecs)})` : 'Call Time (End Round)'}
             </div>
@@ -1012,6 +1043,32 @@ const ViewEvent: React.FC = () => {
           )}
         </div>
 
+        {/* ══ Call Time Confirmation ══ */}
+        {showCallTimeConfirm && (
+          <>
+            <div className="ve-backdrop" onClick={() => { if (!actionLoading) setShowCallTimeConfirm(false); }} />
+            <div className="ve-sheet">
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">Call time on this round?</h3>
+              </div>
+              <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                This closes bidding for the current round immediately and cannot be undone.
+              </p>
+              <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!actionLoading) setShowCallTimeConfirm(false); }}>Cancel</div>
+                <div
+                  className="ve-call-time-btn"
+                  style={{ flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                  onClick={async () => { if (actionLoading) return; await handleEndRound(); setShowCallTimeConfirm(false); }}
+                >
+                  {actionLoading ? 'Ending…' : 'Yes'}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ══ QR / Setup Sheet ══ */}
         {showQR && (
           <>
@@ -1027,14 +1084,14 @@ const ViewEvent: React.FC = () => {
                 {apiEvent?.join_code ? (
                   <>
                     <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent.join_code}`)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}join?code=${apiEvent.join_code}`)}`}
                       alt="QR Code"
                       style={{ width: 180, height: 180, objectFit: 'contain' }}
                     />
                     <div
                       style={{ marginTop: 10, fontSize: 12, color: '#9AA0A6', cursor: 'pointer', textDecoration: 'underline' }}
                       onClick={() => {
-                        const link = `${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent.join_code}`;
+                        const link = `${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}join?code=${apiEvent.join_code}`;
                         navigator.clipboard?.writeText(link);
                       }}
                     >
@@ -1045,9 +1102,77 @@ const ViewEvent: React.FC = () => {
                 )}
               </div>
               <div className="ve-qr-section-title" style={{ marginTop: 20 }}>Public Join Link</div>
-              <div className="ve-join-link-box">
-                <span className="ve-join-link-text">{`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}/join?code=${apiEvent?.join_code ?? ''}`}</span>
-              </div>
+			<div className="ve-join-link-box" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+			  <span
+				className="ve-join-link-text"
+				style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+			  >
+				{`${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}join?code=${apiEvent?.join_code ?? ''}`}
+			  </span>
+			  <button
+				  type="button"
+				  aria-label="Copy join link"
+				  onClick={() =>
+					handleCopy(
+					  `${import.meta.env.VITE_APP_URL ?? 'https://phpmasterminds.com'}join?code=${apiEvent?.join_code ?? ''}`,
+					  'link'
+					)
+				  }
+				  style={{
+					flexShrink: 0,
+					display: 'inline-flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					border: 'none',
+					background: '#2BA7A0',
+					color: '#fff',
+					borderRadius: 12,
+					width: 40,
+					height: 40,
+					cursor: 'pointer',
+				  }}
+				>
+				  <IonIcon
+					icon={copiedField === 'link' ? checkmarkOutline : copyOutline}
+					style={{ fontSize: 18 }}
+				  />
+				</button>
+			</div>
+
+			  <div className="ve-join-link-box" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+			  
+			  <span
+				className="ve-join-link-text"
+				style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+			  >
+				{apiEvent?.join_code ?? ''}
+			  </span>
+			  
+				<button
+				  type="button"
+				  aria-label="Copy event code"
+				  onClick={() => handleCopy(apiEvent?.join_code ?? '', 'code')}
+				  style={{
+					flexShrink: 0,
+					display: 'inline-flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					border: 'none',
+					background: '#2BA7A0',
+					color: '#fff',
+					borderRadius: 12,
+					width: 40,
+					height: 40,
+					cursor: 'pointer',
+				  }}
+				>
+				  <IonIcon
+					icon={copiedField === 'code' ? checkmarkOutline : copyOutline}
+					style={{ fontSize: 18 }}
+				  />
+				</button>
+			  </div>
+			  
               <div className="ve-qr-divider" />
               <div className="ve-qr-section-title">Event Configuration</div>
               {saveError && <div style={{ color: '#E53E3E', fontSize: 13, padding: '0 16px 8px' }}>{saveError}</div>}

@@ -226,7 +226,7 @@ const handleEmailInfoClick = () => {
               <span  className="upload">
                 {uploading ? 'Uploading…' : 'Upload Photo'}
               </span>
-              <div className="optional">
+              <div className={`optional ${uploadError ? 'error_optional' : ''}`}>
                 {uploadError ?? 'Tap to change · JPG, PNG, WEBP'}
               </div>
             </label>

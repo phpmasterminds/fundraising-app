@@ -739,6 +739,11 @@ const BidFlow: React.FC = () => {
   const bidLen     = Math.max(bidDisplay.length, 1);
   const BID_FIT    = 6;                                    // chars that fit at full size
   const bidScale   = bidLen > BID_FIT ? BID_FIT / bidLen : 1;
+  // The bid-entry input lives in a wide centred card (no steppers beside it), so it can
+  // hold many more chars before needing to shrink than the live-adjust input. Give it its
+  // own roomier budget so common amounts like 333,333 / 3,333,333 stay at full 48px size.
+  const BID_ENTRY_FIT = 11;
+  const bidEntryScale = bidLen > BID_ENTRY_FIT ? BID_ENTRY_FIT / bidLen : 1;
 
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
@@ -823,9 +828,9 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src={`${imgBase}/logo_bg.svg?v=2`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
-        <span className="bf-loading-label">PeerFund</span>
+        <span className="bf-loading-label">Fundraising</span>
       </div>
     </IonContent></IonPage>
   );
@@ -836,9 +841,9 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src={`${imgBase}/logo_bg.svg?v=2`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
-        <span className="bf-loading-label">PeerFund</span>
+        <span className="bf-loading-label">Fundraising</span>
       </div>
     </IonContent></IonPage>
   );
@@ -851,7 +856,7 @@ const BidFlow: React.FC = () => {
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M10 3C7 3 4.5 5.5 4.5 8.5c0 2.2 1.3 4.2 3.2 5.3L10 18l2.3-4.2c1.9-1.1 3.2-3.1 3.2-5.3C15.5 5.5 13 3 10 3z" stroke="#F4A43A" strokeWidth="1.6"/>
           </svg>
-          <span className="bf-logo-text">PeerFund</span>
+          <span className="bf-logo-text">Fundraising</span>
         </div>
         <div className="bf-s1-center">
           <div className="bf-clock-ring"><div className="bf-clock-circle">
@@ -893,7 +898,7 @@ const BidFlow: React.FC = () => {
 				if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
 				else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
 			  }}
-			  inputMode="numeric" style={{ flexShrink:0, fontSize: bidScale < 1 ? `${bidScale}em` : undefined, width: `${bidLen}ch` }} />
+			  inputMode="numeric" style={{ flexShrink:0, fontSize: bidEntryScale < 1 ? `${bidEntryScale}em` : undefined, width: `${bidLen}ch` }} />
           </div>
           <p className="bf-amount-sub">Enter your preferred bid amount</p>
         </div>
@@ -950,7 +955,7 @@ const BidFlow: React.FC = () => {
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
-            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-50)}>
+            <button className="bf-adj-btn bf-adj-btn--minus" onClick={() => adjustBid(-10)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="#1A1A2E" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
             <span className="bf-adj-amount" style={{ flexShrink: 0 }}>£<input
@@ -973,7 +978,7 @@ const BidFlow: React.FC = () => {
               aria-label="Your bid amount"
               style={{ border:'none', outline:'none', background:'transparent', font:'inherit', color:'inherit', textAlign:'center', padding:0, flexShrink:0, fontSize: bidScale < 1 ? `${bidScale}em` : undefined, minWidth:'1ch', width:`${bidLen}ch` }}
             /></span>
-            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(50)}>
+            <button className="bf-adj-btn bf-adj-btn--plus" onClick={() => adjustBid(10)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>
             </button>
           </div>

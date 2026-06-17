@@ -12,6 +12,7 @@ import HostHeader from '../../components/HostHeader';
 import { createEvent } from '../../services/events';
 import type { ApiError } from '../../services/api';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 // Returns current date/time in London timezone
 const getLondonNow = () => {
@@ -85,6 +86,15 @@ const CreateEvent: React.FC = () => {
   const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+		 // Allow only images
+		if (!file.type.startsWith('image/')) {
+		  setFieldErrors(prev => ({
+			...prev,
+			logo: 'Please upload a valid image (JPG, PNG, WEBP)'
+		  }));
+		  e.target.value = '';
+		  return;
+		}
       if (file.size > 2 * 1024 * 1024) {
         setFieldErrors(prev => ({ ...prev, logo: 'Avatar must be under 2MB' }));
         e.target.value = '';
@@ -229,7 +239,7 @@ const CreateEvent: React.FC = () => {
       {logoPreview ? (
         <img src={logoPreview} alt="logo" />
       ) : (
-        <img src="/assets/img/avatar.svg" alt="logo" />
+        <img src={`${imgBase}/avatar.svg`} alt="avatar" />
       )}
     </div>
 
@@ -240,7 +250,9 @@ const CreateEvent: React.FC = () => {
       }}
     >
       Choose Event Avatar
+	  {fieldErrors.logo && <span className="field-error">{fieldErrors.logo}</span>}
     </span>
+	
 
     <input
       type="file"
@@ -252,7 +264,8 @@ const CreateEvent: React.FC = () => {
   </label>
 
 </div>
-          {fieldErrors.logo && <span className="field-error">{fieldErrors.logo}</span>}
+
+          
 
           {/* Title */}
           <label>Title</label>
@@ -327,8 +340,8 @@ const CreateEvent: React.FC = () => {
       </span>
 
       <img
-        src="/assets/img/calendar.svg"
-        alt=""
+        src={`${imgBase}/calendar.svg`}
+        alt="calendar"
       />
 
       <input
@@ -376,8 +389,8 @@ const CreateEvent: React.FC = () => {
       </span>
 
       <img
-        src="/assets/img/clock.svg"
-        alt=""
+        src={`${imgBase}/clock.svg`}
+        alt="clock"
       />
 
       <input
@@ -442,7 +455,7 @@ const CreateEvent: React.FC = () => {
               onClick={() => setDurationMins(prev => Math.max(5, prev - 5))}
               disabled={loading || durationMins <= 5}
             >
-              <img src="/assets/img/minus.svg" alt="-" />
+              <img src={`${imgBase}/minus.svg`} alt="-" />
             </button>
             <span>
               {durationMins < 60
@@ -455,7 +468,7 @@ const CreateEvent: React.FC = () => {
               onClick={() => setDurationMins(prev => Math.min(2880, prev + 5))}
               disabled={loading}
             >
-              <img src="/assets/img/plus.svg" alt="+" />
+              <img src={`${imgBase}/plus.svg`} alt="+" />
             </button>
           </div>
 
@@ -466,7 +479,7 @@ const CreateEvent: React.FC = () => {
               onClick={() => setRoundTimeMins(prev => Math.max(0, prev - 1))}
               disabled={loading || roundTimeMins <= 0}
             >
-              <img src="/assets/img/minus.svg" alt="-" />
+              <img src={`${imgBase}/minus.svg`} alt="-" />
             </button>
             <span style={{ color: roundTimeMins === 0 ? '#9AA0A6' : '#25201D' }}>
               {formatMins(roundTimeMins)}
@@ -476,7 +489,7 @@ const CreateEvent: React.FC = () => {
               onClick={() => setRoundTimeMins(prev => Math.min(60, prev + 1))}
               disabled={loading}
             >
-              <img src="/assets/img/plus.svg" alt="+" />
+              <img src={`${imgBase}/plus.svg`} alt="+" />
             </button>
           </div>
           <small style={{ color: '#9AA0A6', fontSize: 12, marginTop: 4, display: 'block' }}>
@@ -491,11 +504,11 @@ const CreateEvent: React.FC = () => {
               <label>Round</label>
               <div className="round-box">
                 <button onClick={() => setRoundsCount(prev => Math.max(1, prev - 1))} disabled={loading}>
-                  <img src="/assets/img/minus.svg" alt="-" />
+                  <img src={`${imgBase}/minus.svg`} alt="-" />
                 </button>
                 <span>{roundsCount}</span>
                 <button className="plus" onClick={() => setRoundsCount(prev => Math.min(10, prev + 1))} disabled={loading}>
-                  <img src="/assets/img/plus.svg" alt="+" />
+                  <img src={`${imgBase}/plus.svg`} alt="+" />
                 </button>
               </div>
             </div>
@@ -503,11 +516,11 @@ const CreateEvent: React.FC = () => {
               <label>No. of people in group</label>
               <div className="round-box">
                 <button onClick={() => setGroupSize(prev => Math.max(2, prev - 1))} disabled={loading}>
-                  <img src="/assets/img/minus.svg" alt="-" />
+                  <img src={`${imgBase}/minus.svg`} alt="-" />
                 </button>
                 <span>{groupSize}</span>
                 <button className="plus" onClick={() => setGroupSize(prev => Math.min(25, prev + 1))} disabled={loading}>
-                  <img src="/assets/img/plus.svg" alt="+" />
+                  <img src={`${imgBase}/plus.svg`} alt="+" />
                 </button>
               </div>
             </div>
@@ -519,7 +532,7 @@ const CreateEvent: React.FC = () => {
           {imagePreviews.length === 0 ? (
             /* ── Empty: original upload box ── */
             <label className="upload-box">
-              <img src="/assets/img/upload.svg" alt="" />
+              <img src={`${imgBase}/upload.svg`} alt="upload" />
               <p>Upload</p>
               <small>Max 10 Images · 2MB per image · 8MB total</small>
               <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
@@ -552,8 +565,8 @@ const CreateEvent: React.FC = () => {
 
       <img
 	  className='addimg'
-        src="/assets/img/upload.svg"
-        alt=""
+        src={`${imgBase}/upload.svg`}
+        alt="upload"
         style={{ width: 20, height: 20, }}
       />
 

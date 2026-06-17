@@ -7,6 +7,7 @@ import { getDonorEvents, logoUrl, Event, DonorEventTab } from '../../services/ev
 import { getEventByCode } from '../../services/donorEvents';
 
 // ── Helpers ───────────────────────────────────────────────────────
+const imgBase = import.meta.env.VITE_ASSETS_URL;
 
 function secondsUntil(startedAt?: string): number {
   if (!startedAt) return 0;
@@ -204,7 +205,7 @@ useEffect(() => {
                 <div className={`card-left ${bgClass(event)}`}>
                   {logo
                     ? <img src={logo} alt={event.name} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} />
-                    : <img src="/assets/img/Event1.png" alt="" />
+                    : <img src={`${imgBase}/Event1.png`} alt="" />
                   }
                 </div>
 
@@ -217,11 +218,11 @@ useEffect(() => {
 
                   <div className="meta">
                     <span>
-                      <img src="/assets/img/users.svg" className="meta-icon" alt="" />
+                      <img src={`${imgBase}/users.svg`} className="meta-icon" alt="" />
                       {event.donors_count ?? 0} donors
                     </span>
                     <span>
-                      <img src="/assets/img/time.svg" className="meta-icon" alt="" />
+                      <img src={`${imgBase}/time.svg`} className="meta-icon" alt="" />
                       {event.rounds_count} rounds
                     </span>
                   </div>

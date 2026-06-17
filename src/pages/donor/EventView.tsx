@@ -8,6 +8,8 @@ import { Swiper, SwiperSlide } from 'swiper/react';
 import 'swiper/css';
 import DonorHeader from '../../components/DonorHeader';
 
+const imgBase = import.meta.env.VITE_ASSETS_URL;
+
 import {
   getDonorEventDetail,
   getEventByCode,
@@ -180,7 +182,8 @@ useEffect(() => {
     ? event.images.map(p => storageUrl(p) ?? '').filter(Boolean)
     : [];
 
-  const logoSrc    = storageUrl(event?.logo) ?? '/assets/img/Heart.svg';
+  //const logoSrc    = storageUrl(event?.logo) ?? {`${imgBase}/Heart.svg`};
+  const logoSrc = storageUrl(event?.logo) || `${imgBase}/Heart.svg`;
   const isMember   = event?.is_member ?? false;
   const isLive     = event?.status === 'live';
   const isFinished = event?.status === 'finished';

@@ -53,8 +53,8 @@ const DonorHeader: React.FC<DonorHeaderProps> = ({
     return (
       <div className="dh-header dh-main">
         <div className="dh-logo">
-          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
-          <span>PeerFund</span>
+          <img src={`${imgBase}/logo_bg.svg?v=2`} alt="logo" />
+          <span>Fundraising</span>
         </div>
 		<div className="hh-right">
 			{aDisplayName}

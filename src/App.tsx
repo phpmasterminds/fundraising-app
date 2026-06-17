@@ -1,6 +1,8 @@
 import { Redirect, Route } from 'react-router-dom';
-import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
+import { IonApp, IonRouterOutlet, setupIonicReact, useIonRouter } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
+import { useEffect } from 'react';
+import { App as CapApp } from '@capacitor/app';
 
 import '@ionic/react/css/core.css';
 import '@ionic/react/css/normalize.css';
@@ -19,6 +21,8 @@ import Join         from './pages/common/join/Join';
 import Login        from './pages/common/login/Login';
 import Register     from './pages/common/register/Register';
 import QrScan       from './pages/common/qr/QrScan';
+import ForgotPassword from './pages/common/forgot/ForgotPassword';
+import ResetPassword from './pages/common/reset/ResetPassword';
 import DonorProfile from './pages/donor/DonorProfile';
 import EventList    from './pages/host/EventList';
 import CreateEvent  from './pages/host/CreateEvent';
@@ -34,10 +38,35 @@ setupIonicReact();
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') || '';
 
+/* Public app URL from env (e.g. https://app.getninesoft.com) */
+const APP_HOST = (() => {
+  try { return new URL(import.meta.env.VITE_APP_URL).host; }
+  catch { return ''; }
+})();
+
+/* ── Deep link handler: opens app on App Link / Universal Link tap ── */
+const DeepLinkHandler: React.FC = () => {
+  const router = useIonRouter();
+  useEffect(() => {
+    const handle = CapApp.addListener('appUrlOpen', ({ url }) => {
+      // url e.g. https://app.getninesoft.com/join?code=BWWD5X7B
+      try {
+        const u = new URL(url);
+        if (APP_HOST && u.host !== APP_HOST) return; // ignore other domains
+        const path = u.pathname + u.search;          // -> /join?code=...
+        if (path) router.push(path);
+      } catch { /* malformed url — ignore */ }
+    });
+    return () => { handle.then(h => h.remove()); };
+  }, [router]);
+  return null;
+};
+
 const App: React.FC = () => {
   return (
     <IonApp>
       <IonReactRouter basename={BASE}>
+        <DeepLinkHandler />
         <IonRouterOutlet>
 
           {/* ── Default redirect ── */}
@@ -53,7 +82,8 @@ const App: React.FC = () => {
           <Route path="/register" component={Register} exact />
           <Route path="/qr"       component={QrScan}   exact />
 		  <Route path="/join-event" component={EventView} exact />
-           
+          <Route exact path="/forgot-password" component={ForgotPassword} />
+		  <Route path="/reset-password" component={ResetPassword} exact />
 
           {/* ── Host protected routes ── */}
           <Route path="/events" exact>

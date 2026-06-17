@@ -237,7 +237,11 @@
     margin-top: 4px;
     padding-left: 14px;
 }
-
+.avatar-section span.field-error{
+	color: #E53935;
+    font-size: 14px;
+	padding-left: 0px;
+}
 .error-banner {
     background: #FDECEA;
     border-radius: 12px;

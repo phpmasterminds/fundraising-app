@@ -734,9 +734,9 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
-        <span className="bf-loading-label">PeerFund</span>
+        <span className="bf-loading-label">Fundraising</span>
       </div>
     </IonContent></IonPage>
   );
@@ -747,9 +747,9 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="PeerFund" />
+          <img src="/assets/img/logo_bg.svg" width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
-        <span className="bf-loading-label">PeerFund</span>
+        <span className="bf-loading-label">Fundraising</span>
       </div>
     </IonContent></IonPage>
   );
@@ -762,7 +762,7 @@ const BidFlow: React.FC = () => {
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M10 3C7 3 4.5 5.5 4.5 8.5c0 2.2 1.3 4.2 3.2 5.3L10 18l2.3-4.2c1.9-1.1 3.2-3.1 3.2-5.3C15.5 5.5 13 3 10 3z" stroke="#F4A43A" strokeWidth="1.6"/>
           </svg>
-          <span className="bf-logo-text">PeerFund</span>
+          <span className="bf-logo-text">Fundraising</span>
         </div>
         <div className="bf-s1-center">
           <div className="bf-clock-ring"><div className="bf-clock-circle">
