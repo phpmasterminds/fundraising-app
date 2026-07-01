@@ -183,11 +183,13 @@ useEffect(() => {
     : [];
 
   //const logoSrc    = storageUrl(event?.logo) ?? {`${imgBase}/Heart.svg`};
-  const logoSrc = storageUrl(event?.logo) || `${imgBase}/Heart.svg`;
+  const logoSrc = storageUrl(event?.logo) || `${imgBase}/logo_bg_white.svg`;
   const isMember   = event?.is_member ?? false;
   const isLive     = event?.status === 'live';
   const isFinished = event?.status === 'finished';
   const isUpcoming = !isLive && !isFinished;
+ const logomargin = event?.logo ? '' : 'marg';
+  
 
   if (loading) {
     return (
@@ -205,7 +207,7 @@ useEffect(() => {
     return (
       <IonPage>
         <IonContent fullscreen className="event-view">
-          <div className="container" style={{ paddingTop: 40, textAlign: 'center', color: '#9AA0A6' }}>
+          <div className="container" >
             Event not found.
           </div>
         </IonContent>
@@ -227,7 +229,7 @@ useEffect(() => {
 
           {/* ICON */}
           <div className="center-icon">
-            <img src={logoSrc} alt={event.name} />
+            <img src={logoSrc} alt={event.name} className={logomargin}/>
           </div>
 
           {/* TITLE */}

@@ -39,8 +39,8 @@ const usePhotoUpload = (
       setError('Please choose a JPG, PNG, WEBP or GIF image.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image must be smaller than 5 MB.');
+    if (file.size > 50 * 1024 * 1024) {
+      setError('Image must be smaller than 50 MB.');
       return;
     }
 

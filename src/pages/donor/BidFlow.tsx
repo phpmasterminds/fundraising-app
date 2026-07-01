@@ -2,6 +2,8 @@ import { IonPage, IonContent } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import {
   getDonorEventDetail,
   getCurrentRound,
@@ -84,6 +86,10 @@ const BidFlow: React.FC = () => {
   const [paymentData,  setPaymentData]  = useState<PaymentSummary | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [hasPaid,      setHasPaid]      = useState(false); // blocks further bidding
+  const [hasQuit,      setHasQuit]      = useState<boolean>(() => localStorage.getItem(`peerfund_quit_${stateEventId}`) === '1'); // blocks bidding after quitting
+  const [quitModalOpen, setQuitModalOpen] = useState(false);
+  const [quitting,     setQuitting]     = useState(false);
+  const [confirmBidOpen, setConfirmBidOpen] = useState(false); // confirmation modal before placing final bid
 
   const roundTimerRef = useRef<any>(null);
   const waitTimerRef  = useRef<any>(null);
@@ -112,6 +118,9 @@ const BidFlow: React.FC = () => {
     setRoundEnding(false);
     setPaymentData(null);
     setHasPaid(false);
+    setHasQuit(localStorage.getItem(`peerfund_quit_${stateEventId}`) === '1');
+    setQuitModalOpen(false);
+    setQuitting(false);
     // Kill any running timers/polls from the old event
     clearInterval(roundTimerRef.current);
     clearInterval(waitTimerRef.current);
@@ -127,6 +136,13 @@ const BidFlow: React.FC = () => {
   useEffect(() => {
     if (!stateEventId) return;
 
+    // If this donor already quit this event, lock them out — no bidding.
+    if (localStorage.getItem(`peerfund_quit_${stateEventId}`) === '1') {
+      setHasQuit(true);
+      setChecking(false);
+      return;
+    }
+
     // Always check round status first to handle finished events immediately
     getRoundStatus(stateEventId).then(res => {
       if (res.payment_status === 'paid') {
@@ -139,6 +155,14 @@ const BidFlow: React.FC = () => {
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
       } else if (res.current_round > 0) {
         setCurrentRound(res.current_round);
+        // If this donor already placed their bid for the active round, lock them out of
+        // editing it after a page refresh — restore the placed amount and show submitted.
+        const placed = localStorage.getItem(`peerfund_bidplaced_${stateEventId}_${res.current_round}`);
+        if (placed !== null && res.round_status === 'open') {
+          const n = parseInt(placed, 10);
+          if (!isNaN(n)) { setBidAmount(n); setInputVal(String(n)); }
+          setScreen('submitted');
+        }
       }
     }).catch(() => {}).finally(() => setChecking(false));
 
@@ -700,16 +724,31 @@ const BidFlow: React.FC = () => {
     try {
       await submitBid(eventId, bidAmount);
       setLastBidAmount(bidAmount);
+      // Lock this donor's bid for THIS round so a page refresh can't reopen the editor.
+      localStorage.setItem(`peerfund_bidplaced_${stateEventId}_${currentRound}`, String(bidAmount));
+      setConfirmBidOpen(false);
       setScreen('submitted');
     } catch (e: any) {
       setSubmitError(e?.response?.data?.message ?? 'Failed to submit bid. Please try again.');
     } finally { setSubmitting(false); }
   };
 
-  const handleQuit = async () => {
-    try { await quitEvent(eventId); } catch (_) {}
-    router.goBack();
-  };
+const handleQuit = () => setQuitModalOpen(true);
+
+const confirmQuit = async () => {
+  setQuitting(true);
+  try {
+    await quitEvent(eventId);
+  } catch (_) {}
+  // Lock this donor out of bidding for this event (persists across reloads)
+  localStorage.setItem(`peerfund_quit_${stateEventId}`, '1');
+  clearInterval(roundTimerRef.current);
+  clearInterval(waitTimerRef.current);
+  clearInterval(pollRef.current);
+  setHasQuit(true);
+  setQuitModalOpen(false);
+  setQuitting(false);
+};
 
   const handleMarkPaid = async () => {
     try { await markPaid(eventId); } catch (_) {}
@@ -828,22 +867,100 @@ const BidFlow: React.FC = () => {
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src={`${imgBase}/logo_bg.svg?v=2`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
         <span className="bf-loading-label">Fundraising</span>
       </div>
     </IonContent></IonPage>
   );
 
-  // Show branded loading while checking event status (prevents flash of bid screen for finished events)
+  // Confirmation modal for quitting the event (Yes / No)
+  const quitModal = quitModalOpen ? (
+    <div
+      onClick={() => !quitting && setQuitModalOpen(false)}
+      style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(13,56,53,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background:'#fff', borderRadius:16, padding:'28px 24px', width:'100%', maxWidth:360, boxShadow:'0 12px 40px rgba(0,0,0,0.18)', textAlign:'center' }}
+      >
+        <h3 style={{ margin:'0 0 8px', fontSize:20, fontWeight:600, color:'#1A1A2E' }}>Quit this event?</h3>
+        <p style={{ margin:'0 0 24px', fontSize:14, lineHeight:1.5, color:'#6B7280' }}>
+          If you quit, you won't be able to bid in this event again. This can't be undone.
+        </p>
+        <div style={{ display:'flex', gap:12 }}>
+          <button
+            onClick={() => setQuitModalOpen(false)}
+            disabled={quitting}
+            style={{ flex:1, padding:'13px 0', borderRadius:65, border:'1.5px solid #E3E5E8', background:'#fff', color:'#25201D', fontSize:15, fontWeight:600, fontFamily:'inherit', cursor:'pointer' }}
+          >No</button>
+          <button
+            onClick={confirmQuit}
+            disabled={quitting}
+            style={{ flex:1, padding:'13px 0', borderRadius:65, border:'none', background:'#2BA7A0', color:'#fff', fontSize:15, fontWeight:600, fontFamily:'inherit', cursor:'pointer', opacity: quitting ? 0.7 : 1 }}
+          >{quitting ? 'Quitting…' : 'Yes, quit'}</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const confirmBidModal = confirmBidOpen ? (
+    <div
+      onClick={() => !submitting && setConfirmBidOpen(false)}
+      style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(13,56,53,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background:'#fff', borderRadius:16, padding:'28px 24px', width:'100%', maxWidth:360, boxShadow:'0 12px 40px rgba(0,0,0,0.18)', textAlign:'center' }}
+      >
+        <h3 style={{ margin:'0 0 8px', fontSize:20, fontWeight:600, color:'#1A1A2E' }}>Place bid of £{fmtAmount(bidAmount)}?</h3>
+        <p style={{ margin:'0 0 24px', fontSize:14, lineHeight:1.5, color:'#6B7280' }}>
+          Are you sure you want to place this bid? You can't change it once it's placed for this round.
+        </p>
+        {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', margin:'0 0 16px' }}>{submitError}</p>}
+        <div style={{ display:'flex', gap:12 }}>
+          <button
+            onClick={() => setConfirmBidOpen(false)}
+            disabled={submitting}
+            style={{ flex:1, padding:'13px 0', borderRadius:65, border:'1.5px solid #E3E5E8', background:'#fff', color:'#25201D', fontSize:15, fontWeight:600, fontFamily:'inherit', cursor:'pointer' }}
+          >Cancel</button>
+          <button
+            onClick={handlePlaceBid}
+            disabled={submitting}
+            style={{ flex:1, padding:'13px 0', borderRadius:65, border:'none', background:'#2BA7A0', color:'#fff', fontSize:15, fontWeight:600, fontFamily:'inherit', cursor:'pointer', opacity: submitting ? 0.7 : 1 }}
+          >{submitting ? 'Placing…' : 'Yes, place bid'}</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (checking) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
-          <img src={`${imgBase}/logo_bg.svg?v=2`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+          <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
         </div>
         <span className="bf-loading-label">Fundraising</span>
+      </div>
+    </IonContent></IonPage>
+  );
+
+  /* ══════ S0: Quit ══════ */
+  if (hasQuit) return (
+    <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', gap:18, padding:'0 28px', textAlign:'center' }}>
+        <div style={{ width:88, height:88, borderRadius:'50%', background:'#F5F6F8', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="#9AA0A6" strokeWidth="1.8"/>
+            <path d="M8 12h8" stroke="#9AA0A6" strokeWidth="1.8" strokeLinecap="round"/>
+          </svg>
+        </div>
+        <h2 style={{ fontSize:24, fontWeight:600, color:'#1A1A2E', margin:0 }}>You've quit the event</h2>
+        <p style={{ fontSize:14, lineHeight:1.6, color:'#9AA0A6', margin:0, maxWidth:300 }}>
+          You're no longer part of {eventName || 'this event'} and can't place any further bids.
+        </p>
+        <button className="bf-teal-btn bf-teal-btn--full" style={{ maxWidth:320, marginTop:8 }} onClick={() => router.goBack()}>Back to lobby</button>
       </div>
     </IonContent></IonPage>
   );
@@ -902,25 +1019,7 @@ const BidFlow: React.FC = () => {
           </div>
           <p className="bf-amount-sub">Enter your preferred bid amount</p>
         </div>
-        <div className="bf-impact-card">
-          <div className="bf-impact-head"><TrendIcon /><span className="bf-impact-title">Impact Preview</span></div>
-          <hr className="bf-impact-hr"/>
-          <div className="bf-impact-cols">
-            <div className="bf-impact-col">
-              <span className="bf-ic-label">Potential Match</span>
-              <span className="bf-ic-big">£{fmtAmount(bidAmount)} × {groupSize}</span>
-              <span className="bf-ic-small">= £{fmtAmount(bidAmount * groupSize)} group total</span>
-            </div>
-            <div className="bf-impact-col">
-              <span className="bf-ic-label">Your Cumulative</span>
-              <span className="bf-ic-big">£{fmtAmount(bidAmount + myCumulative)}</span>
-              <span className="bf-ic-small">incl. this round</span>
-            </div>
-          </div>
-          <hr className="bf-impact-hr"/>
-          <div className="bf-ratio-row"><TrendIcon small /><span className="bf-ratio-label">{matchRatio} ratio match</span></div>
-          <p className="bf-ratio-desc">If £10 is the lowest, the group donates £{fmtAmount(10 * groupSize)} total ({matchRatio} match)</p>
-        </div>
+     
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', marginBottom:8 }}>{submitError}</p>}
         <div className="bf-cta-wrap">
           {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
@@ -940,6 +1039,7 @@ const BidFlow: React.FC = () => {
   /* ══════ S3: Confirm Bid ══════ */
   if (screen === 'confirm-bid') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {confirmBidModal}
       <div className="bf-s3">
         <div className="bf-s3-nav">
           <button className="bf-back-circle" onClick={() => setScreen('bid-entry')}>
@@ -999,7 +1099,7 @@ const BidFlow: React.FC = () => {
               {roundEnding ? '⏳ Round ending — please wait...' : '⏱ Round time has ended — bidding is now closed.'}
             </div>
           ) : (
-            <button className="bf-orange-btn" onClick={handlePlaceBid} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
+            <button className="bf-orange-btn" onClick={() => { setSubmitError(''); setConfirmBidOpen(true); }} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
               <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${fmtAmount(bidAmount)}`}
             </button>
           )}
@@ -1186,6 +1286,7 @@ const BidFlow: React.FC = () => {
           </div>
         )}
         <button className="bf-quit" onClick={handleQuit}>Quit Event</button>
+        {quitModal}
         <div style={{ height: 48 }} />
       </div>
     </IonContent></IonPage>
@@ -1237,6 +1338,7 @@ const BidFlow: React.FC = () => {
           </div>
         </div>
         <button className="bf-quit" style={{ marginTop:8 }} onClick={handleQuit}>Quit Event</button>
+        {quitModal}
       </div>
     </IonContent></IonPage>
   );
@@ -1262,9 +1364,7 @@ const BidFlow: React.FC = () => {
         </div>
         <div className="bf-pay-intro-body">
           <div className="bf-heart-circle">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-              <path d="M18 28s-12-7.5-12-15a7 7 0 0114 0 7 7 0 0114 0c0 7.5-12 15-16 15z" fill="#fff"/>
-            </svg>
+            <img src={`${imgBase}/logo_bg_white.svg`} style={{marginTop:10,maxWidth:70}}/>
           </div>
           <h2 className="bf-pay-intro-title">Thank you, <strong>{paymentData?.donor_name ?? myPseudonym}</strong></h2>
           <p className="bf-pay-intro-sub">The event has concluded. Your final pledge is:</p>
@@ -1341,21 +1441,27 @@ const BidFlow: React.FC = () => {
         </div>
         <div style={{ flex: 1 }} />
         {paymentData?.charity_link && (
-          <iframe
-            src={paymentData.charity_link}
-            title="Charity Payment Page"
-            style={{ width: '100%', border: 'none', borderRadius: 16, marginTop: 16, minHeight: 400 }}
-            onLoad={(e) => {
-              try {
-                const el = e.currentTarget;
-                el.style.height = el.contentWindow?.document?.body?.scrollHeight
-                  ? `${el.contentWindow.document.body.scrollHeight}px`
-                  : '600px';
-              } catch (_) {
-                e.currentTarget.style.height = '600px';
+          <button
+            className="bf-teal-btn"
+            style={{ marginTop: 16 }}
+            onClick={() => {
+              const url = paymentData?.charity_link;
+              if (!url) return;
+              // Normalise a host-entered link that is missing a scheme: without
+              // https:// the native in-app browser fails silently on some devices
+              // and the web fallback resolves it as a relative path.
+              const safeUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+              if (Capacitor.isNativePlatform()) {
+                // Native app: in-app browser sheet (stays inside the app)
+                Browser.open({ url: safeUrl, presentationStyle: 'popover' });
+              } else {
+                // Web: contained popup window (external pages cannot be iframed)
+                window.open(safeUrl, 'charityPayment', 'width=480,height=720');
               }
             }}
-          />
+          >
+            Pay on Charity Page <svg width="20" height="20" className="start-arrow" viewBox="0 0 20 20" fill="none"><path d="M4.16699 10H15.8337" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 4.16663L15.8333 9.99996L10 15.8333" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/></svg>
+          </button>
         )}
         <div className="bf-pay-form-footer">
           <button className="bf-orange-btn" onClick={handleMarkPaid}>
@@ -1453,7 +1559,7 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
   //   < 380px (small phones)  → 2 cards  (widest)
   //   380–479px (most phones) → 3 cards
   //   >= 480px (large/tablet) → AVATAR_PAGE (4)
-  const calcPerView = (w: number) => (w < 380 ? 2 : w < 480 ? 3 : AVATAR_PAGE);
+  const calcPerView = (w: number) => (w < 380 ? 4 : w < 480 ? 4 : AVATAR_PAGE);
   const [perView, setPerView] = useState<number>(typeof window !== 'undefined' ? calcPerView(window.innerWidth) : AVATAR_PAGE);
   useEffect(() => {
     const onResize = () => setPerView(calcPerView(window.innerWidth));
@@ -1516,14 +1622,21 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
     const initial = m?.initial ?? '?';
     const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
     // Mobile polish: equal-height cells; filled member cells read as white cards (Figma look)
+    const activeMember = myGroup?.members?.find((x: any) => x?.is_you);
+    const activeColor = (activeMember ? youRankColor(activeMember) : null) ?? '#F1F2F6';
+
     const colStyle: React.CSSProperties = {
       height: '100%',
       justifyContent: 'flex-start',
-      ...(youColor
-        ? { background: youColor, borderColor: youColor }
-        : m
-          ? { background: '#fff', borderColor: '#EFF1F4' }
-          : { background: 'transparent' }),
+      ...(isYou
+        ? {
+            background: activeColor,
+            border: `1px solid ${activeColor}`,
+          }
+        : {
+            background: 'transparent',
+            border: `1px solid ${activeColor}`,
+          }),
     };
     const nameStyle: React.CSSProperties = {
       width: '100%',

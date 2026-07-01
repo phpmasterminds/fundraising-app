@@ -8,6 +8,7 @@ import './HostProfile.css';
 import HostHeader from '../../components/HostHeader';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
 import { updateProfile, changePassword, getHostStats, HostStats } from '../../services/profileService';
+import { clearSession } from '../../services/auth'; // adjust relative path
 
 const HostProfile: React.FC = () => {
   const router = useIonRouter();
@@ -21,6 +22,9 @@ const HostProfile: React.FC = () => {
 
   // Read-only
   const email = storedUser.email ?? '';
+
+  // ── Avatar image fallback (broken / missing) ─────────
+  const [imgError, setImgError] = useState(false);
 
   // ── Save state ────────────────────────────────────────
   const [saving,    setSaving]    = useState(false);
@@ -71,6 +75,12 @@ const handleEmailInfoClick = () => {
     preview ??
     (storedUser.avatar ? buildStorageUrl(storedUser.avatar) : null);
 
+  // Base for static frontend assets (logo, etc.)
+  const imgBase = (import.meta.env.VITE_ASSETS_URL || '').replace(/\/$/, '');
+
+  // Reset broken-image flag whenever the avatar source changes
+  useEffect(() => { setImgError(false); }, [avatarUrl]);
+
   // ── Fetch stats on mount ──────────────────────────────
   useEffect(() => {
     getHostStats()
@@ -78,11 +88,23 @@ const handleEmailInfoClick = () => {
       .catch(() => {}); // fail silently — stats are non-critical
   }, []);
 
+
+	const handleSignOut = async () => {
+	  // remember where we were, so re-login returns here
+	  const path = window.location.pathname + window.location.search;
+	  localStorage.clear();
+	  await clearSession(); // also clears the durable native token (Preferences)
+	  if (!/^\/(join|login|register|forgot-password|reset-password|qr)(\/|\?|$)/.test(path)) {
+		localStorage.setItem('return_to', path);
+	  }
+	  router.push('/join', 'root');
+	};
+
   // ── Sign out ──────────────────────────────────────────
-  const handleSignOut = () => {
+  /*const handleSignOut = () => {
     localStorage.clear();
     router.push('/join', 'root');
-  };
+  };*/
 
   // ── Save profile ──────────────────────────────────────
   const handleSave = async () => {
@@ -162,8 +184,15 @@ const handleEmailInfoClick = () => {
           <div className="hp-avatar-row">
             <label htmlFor="hp-file" className="hp-avatar-wrap">
               <div className="hp-avatar-circle">
-                {avatarUrl
-                  ? <img src={avatarUrl} className="hp-avatar-img" alt="avatar" />
+                {uploading
+                  ? (
+                    <div className="bf-loading-icon-wrap">
+                      <div className="bf-loading-spin" />
+                      <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+                    </div>
+                  )
+                  : (avatarUrl && !imgError)
+                  ? <img src={avatarUrl} className="hp-avatar-img" alt="avatar" onError={() => setImgError(true)} />
                   : (
                     <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
                       <path

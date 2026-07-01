@@ -8,6 +8,7 @@
     padding-bottom: 100px;
 }
 
+
 /* HEADER */
 
 .top-bar {
@@ -49,8 +50,12 @@
 }
 
 .center-icon img {
-	width: 100%;
+    width: 100%;
     border-radius: 50%;
+}
+
+.marg {
+    margin-top: 10px;
 }
 
 
@@ -111,8 +116,6 @@ h2 {
     object-fit: cover;
     border-radius: 20px;
 }
-
-
 
 .slide {
     width: 100%;

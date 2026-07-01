@@ -211,7 +211,7 @@
 }
 
 
-/* Keyboard open (input focused): release the pinned bottom bar so it flows
+ /* Keyboard open (input focused): release the pinned bottom bar so it flows
    normally and the page scrolls, instead of jumping up over the Donor card.
    Has no effect when the keyboard is closed — original layout unchanged. */
 .container:focus-within .bottom-section {

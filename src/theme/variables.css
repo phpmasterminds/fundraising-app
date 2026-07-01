@@ -70,3 +70,16 @@ html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
 }
+
+.plt-mobile ion-content {
+    --padding-top: 12px;
+    --padding-bottom: 12px;
+}
+
+.plt-mobile .event-page .bottom-btn
+{
+	bottom:30px;
+}
+.plt-mobile .hp-save-btn{
+	margin-bottom:30px;
+}

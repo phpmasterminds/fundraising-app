@@ -10,6 +10,7 @@ import DonorHeader from '../../components/DonorHeader';
 import { joinEvent, getDonorEventDetail } from '../../services/donorEvents';
 import { updateProfile, changePassword } from '../../services/profileService';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
+import { clearSession } from '../../services/auth'; // adjust relative path
 
 const RANDOM_NAMES = [
   'Brave Panda', 'Silent Fox', 'Cosmic Bear', 'Lucky Tiger',
@@ -34,6 +35,9 @@ const DonorProfile: React.FC = () => {
   // Email is read-only — never editable
   const email = storedUser.email ?? '';
 
+  // ── Avatar image fallback (broken / missing) ─────────
+  const [imgError, setImgError] = useState(false);
+
   // ── Photo upload (same as HostProfile) ───────────
   const { preview, uploading, error: uploadError, handleFileChange } = usePhotoUpload(
     ({ url, path }) => {
@@ -54,6 +58,9 @@ const DonorProfile: React.FC = () => {
   const avatarUrl =
     preview ??
     (storedUser.avatar ? buildStorageUrl(storedUser.avatar) : null);
+
+  // Reset broken-image flag whenever the avatar source changes
+  useEffect(() => { setImgError(false); }, [avatarUrl]);
 
   // ── Event info (for join subtitle) ───────────────
   const [eventInfo, setEventInfo] = useState<{ title?: string; charity_name?: string } | null>(null);
@@ -138,11 +145,17 @@ const handleEmailInfoClick = () => {
     }
   };
 
-  // ── Sign out ──────────────────────────────────────
-  const handleSignOut = () => {
-    localStorage.clear();
-    router.push('/join', 'root');
-  };
+	// ── Sign out ──────────────────────────────────────
+	const handleSignOut = async () => {
+	  // remember where we were, so re-login returns here
+	  const path = window.location.pathname + window.location.search;
+	  localStorage.clear();
+	  await clearSession(); // also clears the durable native token (Preferences)
+	  if (!/^\/(join|login|register|forgot-password|reset-password|qr)(\/|\?|$)/.test(path)) {
+		localStorage.setItem('return_to', path);
+	  }
+	  router.push('/join', 'root');
+	};
 
   // ── Password modal ────────────────────────────────
   const openPwModal = () => {
@@ -207,8 +220,15 @@ const handleEmailInfoClick = () => {
           <div className="profile">
             <label htmlFor="dp-file">
               <div className="avatar">
-                {avatarUrl
-                  ? <img src={avatarUrl} className="preview" alt="avatar" />
+                {uploading
+                  ? (
+                    <div className="bf-loading-icon-wrap">
+                      <div className="bf-loading-spin" />
+                      <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+                    </div>
+                  )
+                  : (avatarUrl && !imgError)
+                  ? <img src={avatarUrl} className="preview" alt="avatar" onError={() => setImgError(true)} />
                   : <img src={`${imgBase}/user.svg`} alt="User" />
                 }
               </div>

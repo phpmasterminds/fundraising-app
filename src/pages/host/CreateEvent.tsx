@@ -64,6 +64,7 @@ const CreateEvent: React.FC = () => {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [success, setSuccess]         = useState(false);
 
   // ─── Create button active when required fields are filled ─────────────────
   const isReady = useMemo(() =>
@@ -95,8 +96,8 @@ const CreateEvent: React.FC = () => {
 		  e.target.value = '';
 		  return;
 		}
-      if (file.size > 2 * 1024 * 1024) {
-        setFieldErrors(prev => ({ ...prev, logo: 'Avatar must be under 2MB' }));
+      if (file.size > 100 * 1024 * 1024) {
+        setFieldErrors(prev => ({ ...prev, logo: 'Avatar must be under 100MB' }));
         e.target.value = '';
         return;
       }
@@ -113,15 +114,16 @@ const CreateEvent: React.FC = () => {
       setFieldErrors(prev => ({ ...prev, images: 'Maximum 10 images allowed' }));
       return;
     }
-    const oversized = files.some(f => f.size > 2 * 1024 * 1024);
-    if (oversized) {
-      setFieldErrors(prev => ({ ...prev, images: 'Each image must be under 2MB' }));
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const invalidType = files.some(f => !allowedTypes.includes(f.type));
+    if (invalidType) {
+      setFieldErrors(prev => ({ ...prev, images: 'Please upload a valid image (JPG, PNG, WEBP)' }));
       e.target.value = '';
       return;
     }
     const totalSize = combined.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 8 * 1024 * 1024) {
-      setFieldErrors(prev => ({ ...prev, images: 'Total upload size must be under 8MB' }));
+    if (totalSize > 500 * 1024 * 1024) {
+      setFieldErrors(prev => ({ ...prev, images: 'Total upload size must be under 500MB' }));
       e.target.value = '';
       return;
     }
@@ -183,7 +185,10 @@ const CreateEvent: React.FC = () => {
         images:        imageFiles.length ? imageFiles : undefined,
       });
 
-      history.replace('/events');
+      setSuccess(true);
+      setTimeout(() => {
+        history.replace('/events');
+      }, 1200);
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.errors) {
@@ -204,6 +209,33 @@ const CreateEvent: React.FC = () => {
   return (
     <IonPage>
       <IonContent fullscreen className="create-page">
+
+        {(loading || success || error) && (
+          <div className="ce-overlay">
+            <div className="ce-overlay-card">
+              {success ? (
+                <>
+                  <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+                  <p className="ce-overlay-text ce-overlay-success">Event created successfully</p>
+                </>
+              ) : loading ? (
+                <>
+                  <div className="bf-loading-icon-wrap">
+                    <div className="bf-loading-spin" />
+                    <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+                  </div>
+                  <span className="bf-loading-label">Creating event..</span>
+                </>
+              ) : (
+                <>
+                  <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
+                  <p className="ce-overlay-text ce-overlay-error">{error}</p>
+                  <button className="ce-overlay-dismiss" onClick={() => setError(null)}>Dismiss</button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="container">
 
@@ -534,8 +566,8 @@ const CreateEvent: React.FC = () => {
             <label className="upload-box">
               <img src={`${imgBase}/upload.svg`} alt="upload" />
               <p>Upload</p>
-              <small>Max 10 Images · 2MB per image · 8MB total</small>
-              <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
+              <small>Max 10 Images · JPG, PNG, WEBP · 500MB total</small>
+              <input type="file" hidden multiple accept="image/jpeg,image/png,image/webp" onChange={handleImages} />
             </label>
           ) : (
             /* ── Filled: thumbnail row ── */
@@ -559,7 +591,7 @@ const CreateEvent: React.FC = () => {
         type="file"
         hidden
         multiple
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         onChange={handleImages}
       />
 

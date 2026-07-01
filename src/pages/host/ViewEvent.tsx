@@ -103,6 +103,7 @@ const ViewEvent: React.FC = () => {
   const [activeRoundTab, setActiveRoundTab]       = useState(0);
   const [actionLoading, setActionLoading]         = useState(false);
   const [showCallTimeConfirm, setShowCallTimeConfirm] = useState(false); // Call Time end-round confirmation
+  const [showEndEventConfirm, setShowEndEventConfirm] = useState(false); // End Event confirmation
 
   // ─── Config edit state ────────────────────────────────────────────────────
   const [editName, setEditName]                   = useState('');
@@ -252,13 +253,20 @@ const ViewEvent: React.FC = () => {
     finally { setActionLoading(false); }
   };
 
-  const handleEndEvent = async () => {
-    if (!eventId || actionLoading) return;
-    setActionLoading(true);
-    try { const data = await endEvent(Number(eventId)); setApiEvent(data); }
-    catch (e) { console.error(e); }
-    finally { setActionLoading(false); }
-  };
+const handleEndEvent = async () => {
+  if (!eventId || actionLoading) return;
+
+  setActionLoading(true);
+
+  try {
+    const data = await endEvent(Number(eventId));
+    setApiEvent(data);
+  } catch (e) {
+    console.error(e);
+  } finally {
+    setActionLoading(false);
+  }
+};
 
   const handleStartRound = async () => {
     if (!eventId || actionLoading) return;
@@ -1033,7 +1041,7 @@ const handleCopy = async (text: string, field: string) => {
           )}
 
           {apiEvent?.status === 'live' && (
-            <div className="ve-end-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={handleEndEvent}>
+            <div className="ve-end-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowEndEventConfirm(true); }}>
               {actionLoading ? 'Ending…' : 'End Event'}
             </div>
           )}
@@ -1061,6 +1069,32 @@ const handleCopy = async (text: string, field: string) => {
                   className="ve-call-time-btn"
                   style={{ flex: 1, opacity: actionLoading ? 0.6 : 1 }}
                   onClick={async () => { if (actionLoading) return; await handleEndRound(); setShowCallTimeConfirm(false); }}
+                >
+                  {actionLoading ? 'Ending…' : 'Yes'}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ══ End Event Confirmation ══ */}
+        {showEndEventConfirm && (
+          <>
+            <div className="ve-backdrop" onClick={() => { if (!actionLoading) setShowEndEventConfirm(false); }} />
+            <div className="ve-sheet">
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">End this event?</h3>
+              </div>
+              <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                This ends the event for all donors immediately and cannot be undone.
+              </p>
+              <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!actionLoading) setShowEndEventConfirm(false); }}>Cancel</div>
+                <div
+                  className="ve-call-time-btn"
+                  style={{ flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                  onClick={async () => { if (actionLoading) return; await handleEndEvent(); setShowEndEventConfirm(false); }}
                 >
                   {actionLoading ? 'Ending…' : 'Yes'}
                 </div>
@@ -1138,9 +1172,9 @@ const handleCopy = async (text: string, field: string) => {
 				  />
 				</button>
 			</div>
-
+			  <div className="ve-qr-section-title" style={{ marginTop: 20 }}>Event Code</div>
 			  <div className="ve-join-link-box" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-			  
+
 			  <span
 				className="ve-join-link-text"
 				style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}

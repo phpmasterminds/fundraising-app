@@ -91,11 +91,13 @@ export interface PaymentSummary {
 // ─────────────────────────────────────────────────────────────────
 
 const STORAGE_URL =
-  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace('/api', '') + '/storage/';
+  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/api\/?$/, '') + '/storage/';
 
 export function storageUrl(path: string | null | undefined): string | null {
   if (!path) return null;
-  return STORAGE_URL + path;
+  if (/^https?:\/\//.test(path)) return path;
+  const clean = path.replace(/^\/?(storage\/)?/, '');
+  return STORAGE_URL + clean;
 }
 
 // ─────────────────────────────────────────────────────────────────

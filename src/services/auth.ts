@@ -6,6 +6,7 @@
  */
 
 import api, { ApiError } from './api';
+import { Preferences } from '@capacitor/preferences';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,11 +83,39 @@ export async function logout(): Promise<void> {
 function persistSession(data: AuthResponse): void {
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+  // Durable native copy — survives Capacitor WebView localStorage wipes.
+  Preferences.set({ key: TOKEN_KEY, value: data.token }).catch(() => {});
+  Preferences.set({ key: USER_KEY, value: JSON.stringify(data.user) }).catch(() => {});
 }
 
-export function clearSession(): void {
+export async function clearSession(): Promise<void> {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  // Also clear the durable native copy so a signed-out user is not
+  // silently restored on the next cold start.
+  try {
+    await Preferences.remove({ key: TOKEN_KEY });
+    await Preferences.remove({ key: USER_KEY });
+  } catch { /* native store unavailable (web) — ignore */ }
+}
+
+/**
+ * Restore the session from the durable native store if localStorage was
+ * wiped (Capacitor WebViews can clear localStorage under memory pressure
+ * or OS cache clearing). Call once at app boot, before any auth gate
+ * (AuthGuard / isAuthenticated) is evaluated.
+ */
+export async function restoreSession(): Promise<void> {
+  try {
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      const { value } = await Preferences.get({ key: TOKEN_KEY });
+      if (value) localStorage.setItem(TOKEN_KEY, value);
+    }
+    if (!localStorage.getItem(USER_KEY)) {
+      const { value } = await Preferences.get({ key: USER_KEY });
+      if (value) localStorage.setItem(USER_KEY, value);
+    }
+  } catch { /* native store unavailable (web) — ignore */ }
 }
 
 export function getToken(): string | null {

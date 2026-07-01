@@ -58,6 +58,14 @@ const Login: React.FC = () => {
         return;
       }
 
+      // If we were bounced out of an inner page (logout or kicked) → return there
+      const returnTo = localStorage.getItem('return_to');
+      localStorage.removeItem('return_to');
+      if (returnTo) {
+        router.push(returnTo, 'root', 'replace');
+        return;
+      }
+
       // Normal flow — route by role
       if (user.role === 'host') {
         router.push('/events', 'root', 'replace');
@@ -83,7 +91,7 @@ const Login: React.FC = () => {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <IonPage>
-      <IonContent fullscreen scrollY={false} className="login-page">
+      <IonContent fullscreen scrollY={true} className="login-page">
         <div className="container">
 
           {/* Back */}

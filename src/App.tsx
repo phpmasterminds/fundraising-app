@@ -1,7 +1,7 @@
 import { Redirect, Route } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, setupIonicReact, useIonRouter } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { App as CapApp } from '@capacitor/app';
 
 import '@ionic/react/css/core.css';
@@ -32,7 +32,8 @@ import HostProfile  from './pages/host/HostProfile';
 import DEventList   from './pages/donor/DEventList';
 import EventView    from './pages/donor/EventView';
 import BidFlow      from './pages/donor/BidFlow';
-import { isAuthenticated, getRole } from './services/auth';
+import { isAuthenticated, getRole, restoreSession } from './services/auth';
+import useSessionHeartbeat from './hooks/useSessionHeartbeat';
 
 setupIonicReact();
 
@@ -63,6 +64,19 @@ const DeepLinkHandler: React.FC = () => {
 };
 
 const App: React.FC = () => {
+  useSessionHeartbeat();
+
+  // Rehydrate the session from durable native storage before any auth
+  // gate (AuthGuard) runs — fixes the random logout when the WebView
+  // wipes localStorage. Render nothing until restore completes; the
+  // native splash covers this brief moment on the APK.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    restoreSession().finally(() => setReady(true));
+  }, []);
+
+  if (!ready) return null;
+
   return (
     <IonApp>
       <IonReactRouter basename={BASE}>

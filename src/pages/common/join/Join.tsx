@@ -55,7 +55,7 @@ const Join: React.FC = () => {
 
           {/* Logo */}
           <div className="logo-circle">
-            <img src={`${imgBase}/logo.svg?v=2`} alt="logo" />
+            <img src={`${imgBase}/logo.svg`} alt="logo" />
           </div>
 
           <h1 className="title">Fundraising</h1>

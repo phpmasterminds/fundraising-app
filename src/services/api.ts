@@ -6,6 +6,7 @@
  */
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { Preferences } from '@capacitor/preferences';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ const API_BASE =
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 15_000,
+  timeout: 60_000,
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -40,11 +41,23 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     if (error.response?.status === 401) {
+      // Remember the current page so we can return here after re-login
+      // (skip auth / entry pages — no point returning to those).
+      const path = window.location.pathname + window.location.search;
+      if (!/^\/(join|login|register|forgot-password|reset-password|qr)(\/|\?|$)/.test(path)) {
+        localStorage.setItem('return_to', path);
+      }
       // Token expired or invalid → clear session
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_user');
+      // Drop the durable native copy too, so the dead token is not
+      // restored on the next boot (which would loop straight back to 401).
+      try {
+        await Preferences.remove({ key: 'auth_token' });
+        await Preferences.remove({ key: 'auth_user' });
+      } catch { /* native store unavailable (web) — ignore */ }
       // Redirect to login (works with Ionic router)
       window.location.href = '/login';
     }

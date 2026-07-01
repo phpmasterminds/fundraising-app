@@ -1,8 +1,8 @@
 import api from './api';
 
+//const STORAGE_URL = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace('/api', '') + '/storage/';
 const STORAGE_URL =
-  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace('/api', '') + '/storage/';
-
+  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/api\/?$/, '') + '/storage/';
 
 export interface CreateEventPayload {
   name:          string;
@@ -94,10 +94,20 @@ export interface ApiGroupRow {
   detail_color: string;
 }
 
-export function logoUrl(path: string | null | undefined): string | null {
+/*export function logoUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   return STORAGE_URL + path;
+}*/
+
+export function logoUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  // already a full URL (e.g. backend's `url` field) → use as-is
+  if (/^https?:\/\//.test(path)) return path;
+  // strip any leading slash or "storage/" so we never double it
+  const clean = path.replace(/^\/?(storage\/)?/, '');
+  return STORAGE_URL + clean;
 }
+
 
 // ── Host event tab type ───────────────────────────────────────────
 
@@ -244,3 +254,24 @@ export const createGroup = async (
   const res = await api.post(`/host/events/${eventId}/groups`);
   return res.data;
 };
+
+// ── Host notifications ────────────────────────────────────────────
+
+export interface HostNotification {
+  id:         number;
+  event_id:   number | null;
+  type:       string;
+  title:      string;
+  event_name: string | null;
+  read:       boolean;
+  created_at: string;
+}
+
+export async function getNotifications(): Promise<{ data: HostNotification[]; unread: number }> {
+  const { data } = await api.get<{ data: HostNotification[]; unread: number }>('/host/notifications');
+  return data;
+}
+
+export async function markNotificationsRead(): Promise<void> {
+  await api.post('/host/notifications/read');
+}

@@ -1,14 +1,16 @@
 const BASE_URL =
-  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace('/api', '');
+  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/api\/?$/, '');
 
 /**
  * Converts a Laravel storage relative path → full public URL.
- * e.g. "avatars/1/abc.jpg" → "https://yourserver.com/storage/avatars/1/abc.jpg"
+ * e.g. "avatars/1/abc.jpg" → "https://api.onehive.world/storage/avatars/1/abc.jpg"
+ * Already-absolute URLs (backend's `url` field) pass through unchanged.
  */
 export const storageUrl = (path: string | null | undefined): string | null => {
   if (!path) return null;
-  console.log(`${BASE_URL}/storage/${path}`+'BASE_URL');
-  return `${BASE_URL}/storage/${path}`;
+  if (/^https?:\/\//.test(path)) return path;
+  const clean = path.replace(/^\/?(storage\/)?/, '');
+  return `${BASE_URL}/storage/${clean}`;
 };
 
 /**

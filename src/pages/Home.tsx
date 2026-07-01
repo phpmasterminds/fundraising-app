@@ -15,7 +15,7 @@ const Home: React.FC = () => {
 
         {/* Logo */}
         <div className="logo-box">
-          <img src={`${imgBase}/logo_bg.svg?v=2`} alt="logo" />
+          <img src={`${imgBase}/logo_bg.svg`} alt="logo" />
         </div>
 
         <h1 className="title">Fundraising</h1>

@@ -30,12 +30,9 @@
 }
 
 .bottom {
-    position: fixed;
-    bottom: 20px;
-    left: 0;
-    right: 0;
-    margin: 0 auto;
-    padding: 0 20px;
+    margin-top: auto;
+    padding-top: 20px;
+     padding-bottom: 30px !important;
 }
 
 
@@ -44,13 +41,12 @@
 .back-btn {
     width: 42px;
     height: 42px;
-    background: #eaeaea;
+    background: #f2f2f2;
     border-radius: 50%;
-    display: flex;
+    display: block !important;
+    line-height: 50px;
     align-items: center;
     justify-content: center;
-    font-size: 18px;
-    margin-top: 10px;
 }
 
 
@@ -209,4 +205,18 @@
     color: #CCCCCC;
     font-weight: 500;
     cursor: pointer;
+}
+@media (max-height: 700px) {
+    .login-page .title {
+        margin-top: 15px;
+        font-size: 22px;
+    }
+
+    .input-group {
+        margin-top: 16px;
+    }
+
+    .bottom {
+        padding-bottom: 10px;
+    }
 }
