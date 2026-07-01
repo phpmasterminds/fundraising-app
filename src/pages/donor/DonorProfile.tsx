@@ -238,7 +238,7 @@ const handleEmailInfoClick = () => {
               type="file"
               id="dp-file"
               hidden
-              accept="image/jpeg,image/png,image/webp,image/gif"
+              accept="image/*"
               onChange={handleFileChange}
             />
 

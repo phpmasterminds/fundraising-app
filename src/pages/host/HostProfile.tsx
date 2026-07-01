@@ -209,7 +209,7 @@ const handleEmailInfoClick = () => {
               type="file"
               id="hp-file"
               hidden
-              accept="image/jpeg,image/png,image/webp,image/gif"
+              accept="image/*"
               onChange={handleFileChange}
             />
 

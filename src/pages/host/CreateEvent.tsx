@@ -11,6 +11,7 @@ import './CreateEvent.css';
 import HostHeader from '../../components/HostHeader';
 import { createEvent } from '../../services/events';
 import type { ApiError } from '../../services/api';
+import { normalizeImageForUpload } from '../../hooks/imageConvert';
 
 const imgBase = import.meta.env.VITE_ASSETS_URL;
 
@@ -65,6 +66,7 @@ const CreateEvent: React.FC = () => {
   const [error, setError]             = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [success, setSuccess]         = useState(false);
+  const [imgBusy, setImgBusy]         = useState(false);
 
   // ─── Create button active when required fields are filled ─────────────────
   const isReady = useMemo(() =>
@@ -84,50 +86,61 @@ const CreateEvent: React.FC = () => {
   };
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
-  const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-		 // Allow only images
-		if (!file.type.startsWith('image/')) {
-		  setFieldErrors(prev => ({
-			...prev,
-			logo: 'Please upload a valid image (JPG, PNG, WEBP)'
-		  }));
-		  e.target.value = '';
-		  return;
-		}
       if (file.size > 100 * 1024 * 1024) {
         setFieldErrors(prev => ({ ...prev, logo: 'Avatar must be under 100MB' }));
         e.target.value = '';
         return;
       }
+      let normalizedFile: File;
+      setImgBusy(true);
+      try {
+        normalizedFile = await normalizeImageForUpload(file);
+      } catch {
+        setFieldErrors(prev => ({
+          ...prev,
+          logo: 'Please upload a valid image'
+        }));
+        e.target.value = '';
+        return;
+      } finally {
+        setImgBusy(false);
+      }
       setFieldErrors(prev => ({ ...prev, logo: '' }));
-      setLogoFile(file);
-      setLogoPreview(URL.createObjectURL(file));
+      setLogoFile(normalizedFile);
+      setLogoPreview(URL.createObjectURL(normalizedFile));
     }
   };
 
-  const handleImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const combined = [...imageFiles, ...files];
-    if (combined.length > 10) {
+    if (imageFiles.length + files.length > 10) {
       setFieldErrors(prev => ({ ...prev, images: 'Maximum 10 images allowed' }));
-      return;
-    }
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    const invalidType = files.some(f => !allowedTypes.includes(f.type));
-    if (invalidType) {
-      setFieldErrors(prev => ({ ...prev, images: 'Please upload a valid image (JPG, PNG, WEBP)' }));
       e.target.value = '';
       return;
     }
+    // Normalize any picked format (incl. HEIC/HEIF) to JPEG before use
+    let normalized: File[];
+    setImgBusy(true);
+    try {
+      normalized = await Promise.all(files.map(f => normalizeImageForUpload(f)));
+    } catch {
+      setFieldErrors(prev => ({ ...prev, images: 'Please upload a valid image' }));
+      e.target.value = '';
+      return;
+    } finally {
+      setImgBusy(false);
+    }
+    const combined = [...imageFiles, ...normalized];
     const totalSize = combined.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > 500 * 1024 * 1024) {
       setFieldErrors(prev => ({ ...prev, images: 'Total upload size must be under 500MB' }));
       e.target.value = '';
       return;
     }
-    const previews = files.map(f => URL.createObjectURL(f));
+    const previews = normalized.map(f => URL.createObjectURL(f));
     setImageFiles(combined);
     setImagePreviews(prev => [...prev, ...previews]);
     setFieldErrors(prev => ({ ...prev, images: '' }));
@@ -210,7 +223,7 @@ const CreateEvent: React.FC = () => {
     <IonPage>
       <IonContent fullscreen className="create-page">
 
-        {(loading || success || error) && (
+        {(loading || success || error || imgBusy) && (
           <div className="ce-overlay">
             <div className="ce-overlay-card">
               {success ? (
@@ -218,13 +231,13 @@ const CreateEvent: React.FC = () => {
                   <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
                   <p className="ce-overlay-text ce-overlay-success">Event created successfully</p>
                 </>
-              ) : loading ? (
+              ) : (loading || imgBusy) ? (
                 <>
                   <div className="bf-loading-icon-wrap">
                     <div className="bf-loading-spin" />
                     <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Fundraising" />
                   </div>
-                  <span className="bf-loading-label">Creating event..</span>
+                  <span className="bf-loading-label">{imgBusy ? 'Processing image..' : 'Creating event..'}</span>
                 </>
               ) : (
                 <>
@@ -567,7 +580,7 @@ const CreateEvent: React.FC = () => {
               <img src={`${imgBase}/upload.svg`} alt="upload" />
               <p>Upload</p>
               <small>Max 10 Images · JPG, PNG, WEBP · 500MB total</small>
-              <input type="file" hidden multiple accept="image/jpeg,image/png,image/webp" onChange={handleImages} />
+              <input type="file" hidden multiple accept="image/*" onChange={handleImages} />
             </label>
           ) : (
             /* ── Filled: thumbnail row ── */
@@ -591,7 +604,7 @@ const CreateEvent: React.FC = () => {
         type="file"
         hidden
         multiple
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/*"
         onChange={handleImages}
       />
 

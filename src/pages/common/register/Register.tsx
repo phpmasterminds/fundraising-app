@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { register, getRole, getPendingRole, getToken, refreshUser } from '../../../services/auth';
 import type { ApiError } from '../../../services/api';
 import useAuthRedirect from '../../../hooks/useAuthRedirect';
+import { normalizeImageForUpload } from '../../../hooks/imageConvert';
 import './Register.css';
 
 const imgBase = import.meta.env.VITE_ASSETS_URL;
@@ -42,23 +43,31 @@ const Register: React.FC = () => {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [avatarBusy, setAvatarBusy]   = useState(false);
 
   if (checking) return null;
 
   // ─── Avatar picker ────────────────────────────────────────────────────────
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file.');
-      return;
-    }
     if (file.size > 5 * 1024 * 1024) {
       setError('Image must be under 5 MB.');
       return;
     }
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
+    setError(null);
+    setAvatarBusy(true);
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeImageForUpload(file);
+    } catch {
+      setError('Please select a valid image file.');
+      return;
+    } finally {
+      setAvatarBusy(false);
+    }
+    setAvatarFile(normalizedFile);
+    setAvatarPreview(URL.createObjectURL(normalizedFile));
   };
 
   // ─── Validation ───────────────────────────────────────────────────────────
@@ -159,6 +168,25 @@ const Register: React.FC = () => {
     <IonPage>
       <IonContent fullscreen scrollY={true} className="register-page">
         <div className="container">
+
+          {avatarBusy && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 999,
+              }}
+            >
+              <div className="bf-loading-icon-wrap">
+                <div className="bf-loading-spin" />
+                <img src={`${imgBase}/logo_bg.svg`} width={72} height={72} style={{ borderRadius: '50%' }} alt="Processing" />
+              </div>
+            </div>
+          )}
 
           {/* Back */}
           <div className="back-btn" onClick={() => router.back()}>
