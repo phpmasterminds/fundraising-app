@@ -27,6 +27,11 @@ export interface Event {
   target_amount:         number;
   rounds_count:          number;
   group_size:            number;
+  // Group size used from round 2 onward. Null until round 1 closes, at which point
+  // the backend stores the doubled value and the host may override it exactly once.
+  group_size_after_r1?:  number | null;
+  // True only while round 1 is closed and round 2 has not opened yet.
+  can_change_group_size?: boolean;
   started_at?:           string;
   charity_link?:         string;
   logo?:                 string;
@@ -213,6 +218,23 @@ export async function endRound(eventId: number, roundId: number): Promise<void> 
   await api.post(`/host/events/${eventId}/rounds/${roundId}/end`);
 }
 
+/**
+ * PATCH /host/events/:id/group-size
+ *
+ * Only valid while `can_change_group_size` is true (round 1 closed, round 2 not yet
+ * open). Rebuilds round 2's groups from round 1's bid ranking at the new size.
+ * Returns 422 outside that window.
+ */
+export async function updateGroupSize(
+  eventId: number,
+  groupSize: number,
+): Promise<{ group_size_after_r1: number; groups: ApiGroup[] }> {
+  const { data } = await api.patch(`/host/events/${eventId}/group-size`, {
+    group_size: groupSize,
+  });
+  return data;
+}
+
 // ── Group management ─────────────────────────────────────────────
 
 export async function moveGroupMembers(
@@ -274,4 +296,60 @@ export async function getNotifications(): Promise<{ data: HostNotification[]; un
 
 export async function markNotificationsRead(): Promise<void> {
   await api.post('/host/notifications/read');
+}
+
+// ── Donor messaging (host → donor, one-way) ───────────────────
+
+export interface DonorMessage {
+  id:           number;
+  body:         string;
+  status:       'sent' | 'delivered' | 'seen';
+  delivered_at: string | null;
+  read_at:      string | null;
+  created_at:   string;
+}
+
+export interface PendingMessage {
+  id:         number;
+  event_id:   number;
+  event_name: string | null;
+  body:       string;
+  created_at: string;
+}
+
+/** Host: thread of messages sent to one donor (oldest → newest). */
+export async function getDonorMessages(
+  eventId: number,
+  groupMemberId: number,
+): Promise<DonorMessage[]> {
+  const { data } = await api.get<{ messages: DonorMessage[] }>(
+    `/host/events/${eventId}/donors/${groupMemberId}/messages`,
+  );
+  return data.messages;
+}
+
+/** Host: send a message to one donor. Returns the created message. */
+export async function sendDonorMessage(
+  eventId: number,
+  groupMemberId: number,
+  body: string,
+): Promise<DonorMessage> {
+  const { data } = await api.post<{ message: DonorMessage }>(
+    `/host/events/${eventId}/donors/${groupMemberId}/messages`,
+    { body },
+  );
+  return data.message;
+}
+
+/** Donor: undelivered messages for the logged-in donor, FIFO across events. */
+export async function getPendingMessages(): Promise<PendingMessage[]> {
+  const { data } = await api.get<{ messages: PendingMessage[] }>(
+    '/donor/messages/pending',
+  );
+  return data.messages;
+}
+
+/** Donor: mark messages seen once viewed/dismissed. */
+export async function ackMessages(ids: number[]): Promise<void> {
+  await api.post('/donor/messages/ack', { ids });
 }

@@ -90,10 +90,12 @@ const BidFlow: React.FC = () => {
   const [quitModalOpen, setQuitModalOpen] = useState(false);
   const [quitting,     setQuitting]     = useState(false);
   const [confirmBidOpen, setConfirmBidOpen] = useState(false); // confirmation modal before placing final bid
+  const [thanksOpen, setThanksOpen] = useState(false); // "thanks for bidding" modal shown after placing; donor stays on the bid screen to keep editing
 
   const roundTimerRef = useRef<any>(null);
   const waitTimerRef  = useRef<any>(null);
   const pollRef       = useRef<any>(null);
+  const groupPollRef  = useRef<any>(null); // confirm-bid group/zero-bid refresh runs on its own interval so it never clobbers Effect 3b's status+timer poll (pollRef)
   const resultsFetchedRef = useRef<boolean>(false); // true once we've fetched final grouped results
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const rafRef        = useRef<number>(0);
@@ -153,6 +155,14 @@ const BidFlow: React.FC = () => {
       } else if (res.event_status === 'finished' || res.round_status === 'finished') {
         setScreen('payment-intro');
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
+      } else if (res.round_status === 'waiting') {
+        // Landing during the between-rounds gap (fresh join or refresh): show the existing
+        // waiting screen instead of round-results, which would read as "No bids placed / £0"
+        // for a donor who didn't play the just-closed round (Option 1). Effect 8 polls this
+        // screen and moves them onto the bid screen the moment the next round opens.
+        setCurrentRound(res.current_round);
+        setWaitingSecsLeft(res.seconds_until_next);
+        setScreen('waiting');
       } else if (res.current_round > 0) {
         setCurrentRound(res.current_round);
         // If this donor already placed their bid for the active round, lock them out of
@@ -161,7 +171,7 @@ const BidFlow: React.FC = () => {
         if (placed !== null && res.round_status === 'open') {
           const n = parseInt(placed, 10);
           if (!isNaN(n)) { setBidAmount(n); setInputVal(String(n)); }
-          setScreen('submitted');
+          setScreen('confirm-bid'); // keep the bid editable after refresh until the round completes
         }
       }
     }).catch(() => {}).finally(() => setChecking(false));
@@ -197,7 +207,7 @@ const BidFlow: React.FC = () => {
   // 2. starting → bid-entry after 2.5s
   useEffect(() => {
     if (screen !== 'starting') return;
-    const t = setTimeout(() => setScreen('bid-entry'), 2500);
+    const t = setTimeout(() => setScreen('confirm-bid'), 2500);
     return () => clearTimeout(t);
   }, [screen]);
 
@@ -299,8 +309,23 @@ const BidFlow: React.FC = () => {
             setRoundSecsLeft(res.seconds_left);
           }
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
-          setScreen('bid-entry');
+          setScreen('confirm-bid');
           return;
+        }
+
+        // Same round still open — re-sync the countdown from the server on every poll
+        // so the local 1s tick can never drift (background tab / device sleep / emulation
+        // throttle). Guard against a transient null/0: only a positive server value
+        // overwrites the display, so a boundary blip can't blank the timer or lock bidding
+        // before the round is truly closed (the closed/finished branches above handle that).
+        if (res.round_status === 'open' && res.current_round === currentRound
+            && res.seconds_left !== null && res.seconds_left !== undefined && res.seconds_left > 0) {
+          setRoundSecsLeft(res.seconds_left);
+          // Refresh the group + bids snapshot too, so the "You" amount, other donors'
+          // live bids and group assignment update while the donor stays on the bid screen
+          // (they no longer navigate away after placing). Only roundData is refreshed here —
+          // the timer is synced above and the bid input (bidAmount/inputVal) is untouched.
+          getCurrentRound(eventId).then(d => setRoundData(d)).catch(() => {});
         }
 
         // Host enabled the waiting period between rounds
@@ -459,21 +484,27 @@ const BidFlow: React.FC = () => {
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
           resultsFetchedRef.current = false; // reset so next round's results are fetched fresh
-          setRoundData(null); // clear stale round data before switching
-          setRoundCloseSecsLeft(null);
-          setWaitingSecsLeft(null);
-          setRoundEnding(false);
+          // Fetch the next round's data FIRST — do NOT touch roundData/timers yet. The
+          // round-results screen is still mounted at this point, so nulling roundData here
+          // (old behaviour) made it re-render mid-wait with wiped-out fields (Match Ratio/
+          // group size falling back to defaults, matched amount + group total collapsing to
+          // £0, "No bids placed") before the screen switched to confirm-bid. Applying every
+          // update together, only once the new data is in hand, removes that in-between frame.
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
             setCurrentRound(d.round_number);
             setRoundSecsLeft(d.seconds_left);
           } catch (_) {
+            setRoundData(null);
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(null);
+          setRoundEnding(false);
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
-          setScreen('bid-entry');
+          setScreen('confirm-bid');
           return;
         }
 
@@ -501,9 +532,9 @@ const BidFlow: React.FC = () => {
         // Between rounds (waiting) — fetch final grouped results ONCE, then preserve display
         if (res.round_status === 'waiting') {
           setRoundCloseSecsLeft(null);
-          // Seed waiting timer from server only on first poll (local tick handles decrement)
+          // Always re-sync the waiting timer from the server so the local tick can never drift
           if (res.seconds_until_next !== null && res.seconds_until_next !== undefined) {
-            setWaitingSecsLeft(prev => (prev === null || prev <= 0) ? res.seconds_until_next : prev);
+            setWaitingSecsLeft(res.seconds_until_next);
           }
           // Fetch grouped results exactly once — roundData at this point still has
           // open-round data (group_total: null, all bids unscoped). One getCurrentRound
@@ -520,12 +551,26 @@ const BidFlow: React.FC = () => {
           return;
         }
 
-        // Round still open (donor submitted early) — refresh round_bids so group bids update live
+        // The round we're showing as "complete" is actually still OPEN (same round number).
+        // This happens when currentRound advanced to the open round while the donor was routed
+        // to results at a boundary — the strict `>` guard above then never fires and the donor
+        // is stranded on "Round N Complete" for a live round. Recover to the bid screen.
+        // (Last-round results are handled above at `currentRound >= totalRounds`, so we never
+        // reach here for the final round; the old submit-early watch flow no longer exists.)
         if (res.round_status === 'open' && res.current_round === currentRound) {
+          clearInterval(pollRef.current);
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(null);
+          setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
-          } catch (_) {}
+            setRoundSecsLeft(d.seconds_left);
+          } catch (_) {
+            setRoundSecsLeft(res.seconds_left);
+          }
+          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setScreen('confirm-bid');
           return;
         }
 
@@ -579,21 +624,24 @@ const BidFlow: React.FC = () => {
         }
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
-          setRoundData(null); // clear stale round data before switching
-          setRoundCloseSecsLeft(null);
-          setWaitingSecsLeft(null);
-          setRoundEnding(false);
+          // Fetch first, apply everything together once the data is in hand — see the
+          // matching comment in Effect 6 above for why roundData must not be nulled while
+          // the round-results screen is still on screen.
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
             setCurrentRound(d.round_number);
             setRoundSecsLeft(d.seconds_left);
           } catch (_) {
+            setRoundData(null);
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
+          setRoundCloseSecsLeft(null);
+          setWaitingSecsLeft(null);
+          setRoundEnding(false);
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
-          setScreen('bid-entry');
+          setScreen('confirm-bid');
           return;
         }
 
@@ -619,21 +667,22 @@ const BidFlow: React.FC = () => {
   // 8a. confirm-bid: poll every 5s to refresh group member bid statuses
   useEffect(() => {
     if (screen !== 'confirm-bid') return;
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+    clearInterval(groupPollRef.current);
+    groupPollRef.current = setInterval(async () => {
       try {
         const d = await getCurrentRound(eventId);
         setRoundData(d);
-        // Reconcile ignore_zero_bids on this screen too. confirm-bid is served by THIS
-        // poll (getCurrentRound) — the getRoundStatus poll in Effect 3b is cleared here
-        // because both share pollRef. Without this, a host toggle is only picked up on
-        // refresh, so the "Please enter a bid amount." error keeps blocking £0 bids.
+        // Reconcile ignore_zero_bids on this screen too. This runs on its OWN interval
+        // (groupPollRef) so it no longer clobbers Effect 3b's status+timer poll (pollRef).
+        // Effect 3b now keeps running on confirm-bid: it syncs the round timer from the
+        // server every tick and detects round-close / event-finished, so the donor can't
+        // sit on a phantom countdown or try to bid after the round has already ended.
         getDonorEventDetail(eventId).then(ev => {
           if (ev.ignore_zero_bids !== undefined) setIgnoreZeroBids(ev.ignore_zero_bids !== false);
         }).catch(() => {});
       } catch (_) {}
     }, 5000);
-    return () => clearInterval(pollRef.current);
+    return () => clearInterval(groupPollRef.current);
   }, [screen, eventId]);
 
   // 8. waiting: poll every 5s for next round opening
@@ -657,7 +706,7 @@ const BidFlow: React.FC = () => {
             setRoundSecsLeft(res.seconds_left);
           }
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
-          setScreen('bid-entry');
+          setScreen('confirm-bid');
         } else if (res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
           setScreen('payment-intro');
@@ -727,7 +776,7 @@ const BidFlow: React.FC = () => {
       // Lock this donor's bid for THIS round so a page refresh can't reopen the editor.
       localStorage.setItem(`peerfund_bidplaced_${stateEventId}_${currentRound}`, String(bidAmount));
       setConfirmBidOpen(false);
-      setScreen('submitted');
+      setThanksOpen(true); // stay on the bid screen; donor can keep updating the bid until the round completes
     } catch (e: any) {
       setSubmitError(e?.response?.data?.message ?? 'Failed to submit bid. Please try again.');
     } finally { setSubmitting(false); }
@@ -934,6 +983,33 @@ const confirmQuit = async () => {
     </div>
   ) : null;
 
+  const thanksBidModal = thanksOpen ? (
+    <div
+      onClick={() => setThanksOpen(false)}
+      style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(13,56,53,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background:'#fff', borderRadius:16, padding:'28px 24px', width:'100%', maxWidth:360, boxShadow:'0 12px 40px rgba(0,0,0,0.18)', textAlign:'center' }}
+      >
+        <div style={{ margin:'0 auto 14px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+            <circle cx="24" cy="24" r="23" stroke="#2BA7A0" strokeWidth="2"/>
+            <path d="M14 24l7 7 13-14" stroke="#2BA7A0" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <h3 style={{ margin:'0 0 8px', fontSize:20, fontWeight:600, color:'#1A1A2E' }}>Thanks for bidding!</h3>
+        <p style={{ margin:'0 0 24px', fontSize:14, lineHeight:1.5, color:'#6B7280' }}>
+          Your bid of £{fmtAmount(bidAmount)} has been placed. You can keep updating it until the round ends.
+        </p>
+        <button
+          onClick={() => setThanksOpen(false)}
+          style={{ width:'100%', padding:'13px 0', borderRadius:65, border:'none', background:'#2BA7A0', color:'#fff', fontSize:15, fontWeight:600, fontFamily:'inherit', cursor:'pointer' }}
+        >Done</button>
+      </div>
+    </div>
+  ) : null;
+
   if (checking) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
       <div className="bf-loading-screen">
@@ -1040,9 +1116,10 @@ const confirmQuit = async () => {
   if (screen === 'confirm-bid') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       {confirmBidModal}
+      {thanksBidModal}
       <div className="bf-s3">
         <div className="bf-s3-nav">
-          <button className="bf-back-circle" onClick={() => setScreen('bid-entry')}>
+          <button className="bf-back-circle" onClick={() => router.goBack()}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M7.99967 12.6666L3.33301 7.99998L7.99967 3.33331" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M12.6663 8H3.33301" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1550,9 +1627,24 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
 const AVATAR_PAGE = 4;
 
 const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number }> = ({ myGroup, groupSize, roundBids = [], myBid = 0 }) => {
-  // When group not yet assigned, fall back to round_bids so donors who already bid are visible
-  const members = myGroup?.members ?? (roundBids.length > 0 ? roundBids.map((b: any) => ({ ...b, bid_status: 'submitted' })) : []);
-  const slotCount = myGroup ? groupSize : Math.max(Math.min(groupSize, 4), members.length);
+  // Prefer myGroup.members (scoped to THIS donor's group) once a group has been assigned.
+  // round_bids is UNSCOPED — it holds every donor's bid across every group in the round, so
+  // using it after grouping shows other groups' donors inside this group's card (e.g. Group A's
+  // members bleeding into a newly-formed Group B). Only fall back to round_bids pre-grouping,
+  // so donors who already bid are still visible before assignment.
+  const members = (myGroup?.members && myGroup.members.length > 0)
+    ? myGroup.members
+    : roundBids.map((b: any) => ({ ...b, bid_status: 'submitted' }));
+  // slotCount must never fall below the number of REAL members. groupSize is the group's
+  // configured capacity, not its headcount — the no-singleton rule means a group of 2
+  // legitimately holds 3 donors (the 3rd folds in rather than sitting alone in Group B).
+  // Clamping slots to groupSize silently dropped that 3rd member's card while the header
+  // below still counted them from members.length — "matched with 2 other donors" above
+  // only 2 rendered cards. Math.max keeps the pad-to-capacity behaviour for a group that
+  // is still filling AND guarantees every assigned member gets a slot.
+  const slotCount = myGroup
+    ? Math.max(groupSize, members.length)
+    : Math.max(Math.min(groupSize, 4), members.length);
   const slots = Array.from({ length: slotCount }, (_, i) => members[i] ?? null);
 
   // Responsive: fewer cards per view on smaller screens → wider slides that read clearly.
@@ -1595,10 +1687,14 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
   const minAmt = rankPool.length ? Math.min(...rankPool) : -1;
   const youRankColor = (m: any): string | null => {
     const amt = amountOf(m);
-    if (amt <= 0 || maxAmt === minAmt) return null;
-    if (amt === maxAmt) return '#27A99F'; // highest → green
-    if (amt === minAmt) return '#F6494D'; // lowest  → red
-    return '#FCB13E';                     // middle  → amber
+    // Binary colour rule, compared only within the donor's own group:
+    //   red   = the lowest bid (all tied lowest bidders are red), and every zero bid
+    //   green = everyone else
+    // The middle 'amber' tier has been removed. minAmt is the lowest NON-ZERO bid,
+    // because rankPool filters out zeros — matching the server's matched-amount rule.
+    if (maxAmt < 0) return null;          // nobody has bid yet → no colour
+    if (amt <= 0) return '#F6494D';       // zero bid → red
+    return amt === minAmt ? '#F6494D' : '#27A99F';
   };
 
   // ★ NEW: tint the whole card to match the logged-in user's rank (light fills from Figma)
@@ -1677,7 +1773,7 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
           <span className="bf-gc-name">{myGroup?.name ?? 'Your Group'}</span>
         </div>
       </div>
-      {myGroup && <p className="bf-gc-sub">You're matched with {(myGroup.members?.length ?? groupSize) - 1} other donors</p>}
+      {myGroup && <p className="bf-gc-sub">You're matched with {Math.max(0, members.length - 1)} other donors</p>}
       {!myGroup && <p className="bf-gc-sub">Waiting for group assignment...</p>}
       {needsSlider ? (
         <Swiper

@@ -17,6 +17,8 @@ import '@ionic/react/css/display.css';
 import './theme/variables.css';
 
 import AuthGuard    from './components/AuthGuard';
+import DonorMessageListener from './components/DonorMessageListener';
+import { PaymentGateProvider, PaymentGuard } from './components/PaymentGate';
 import Join         from './pages/common/join/Join';
 import Login        from './pages/common/login/Login';
 import Register     from './pages/common/register/Register';
@@ -32,6 +34,7 @@ import HostProfile  from './pages/host/HostProfile';
 import DEventList   from './pages/donor/DEventList';
 import EventView    from './pages/donor/EventView';
 import BidFlow      from './pages/donor/BidFlow';
+import PaymentPage  from './pages/donor/PaymentPage';
 import { isAuthenticated, getRole, restoreSession } from './services/auth';
 import useSessionHeartbeat from './hooks/useSessionHeartbeat';
 
@@ -79,8 +82,11 @@ const App: React.FC = () => {
 
   return (
     <IonApp>
+      <PaymentGateProvider>
       <IonReactRouter basename={BASE}>
         <DeepLinkHandler />
+        <PaymentGuard />
+        <DonorMessageListener />
         <IonRouterOutlet>
 
           {/* ── Default redirect ── */}
@@ -123,6 +129,9 @@ const App: React.FC = () => {
           <Route path="/profile" exact>
             <AuthGuard role="donor"><DonorProfile /></AuthGuard>
           </Route>
+          <Route path="/payment/:eventId" exact>
+            <AuthGuard role="donor"><PaymentPage /></AuthGuard>
+          </Route>
          
           <Route path="/bid" exact>
             <AuthGuard role="donor"><BidFlow /></AuthGuard>
@@ -130,6 +139,7 @@ const App: React.FC = () => {
 
         </IonRouterOutlet>
       </IonReactRouter>
+      </PaymentGateProvider>
     </IonApp>
   );
 };

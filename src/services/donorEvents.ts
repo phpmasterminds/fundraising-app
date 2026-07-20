@@ -209,3 +209,43 @@ export async function advanceRound(eventId: number): Promise<AdvanceRoundResult>
   const { data } = await api.post<AdvanceRoundResult>(`/donor/events/${eventId}/rounds/advance`);
   return data;
 }
+
+export interface RoundHistoryEntry {
+  round_number:   number;
+  your_bid:       number | null;  // null = did not bid this round, 0 = bid zero
+  group_name:     string | null;
+  group_size:     number;
+  matched_amount: number;         // lowest non-zero bid in your group that round
+  you_owe:        number;         // matched_amount, or 0 if your own bid was zero
+  counted:        boolean;        // whether this round counts toward your payment
+}
+ 
+export interface RoundHistory {
+  event_name:   string;
+  charity_name: string;
+  rounds:       RoundHistoryEntry[];
+  payment_due:  number;           // sum of you_owe across all rounds
+}
+ 
+// GET /donor/events/:id/history
+export async function getRoundHistory(eventId: number): Promise<RoundHistory> {
+  const { data } = await api.get<RoundHistory>(`/donor/events/${eventId}/history`);
+  return data;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Global payment gate — oldest finished event still owing money
+// ─────────────────────────────────────────────────────────────────
+
+export interface PendingPayment {
+  has_pending: boolean;
+  event_id?:   number;
+  event_name?: string;
+  amount?:     number;
+}
+
+/** GET /donor/pending-payment — drives the app-wide payment lock */
+export async function getPendingPayment(): Promise<PendingPayment> {
+  const { data } = await api.get<PendingPayment>('/donor/pending-payment');
+  return data;
+}
