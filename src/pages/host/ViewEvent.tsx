@@ -23,6 +23,7 @@ import {
   createGroup,
   sendDonorMessage,
   getDonorMessages,
+  getUnreadDonorMessageIds,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage } from '../../services/events';
 import { copyOutline, checkmarkOutline } from 'ionicons/icons';
@@ -57,7 +58,39 @@ interface RoundGroupRow {
   alert?: boolean;
   detail: string | null;
   detailColor?: string;
+  donors: HistoryDonor[];
 }
+
+// ── Round/Summary group drill-down (host clicks a group row to see members) ──
+// Raw shape expected from the backend on rounds_overview.group_rows[].donors
+// and summary.rounds[].groups[].donors. Kept as its own type (rather than
+// extending the imported ApiGroupRow) so this file doesn't need
+// services/events.ts updated first — once that file's ApiGroupRow/ApiRound
+// types add a matching `donors` field, `row.donors` below can drop the cast.
+interface ApiHistoryDonor {
+  pseudonym: string;
+  initial: string;
+  bid_amount: string | null;
+  matched_amount: string | null;   // this round's group min bid, credited only if this donor bid > 0
+  is_quit: boolean;
+}
+
+interface HistoryDonor {
+  initial: string;
+  name: string;
+  bid: string | null;
+  matched: string | null;
+  isQuit: boolean;
+}
+
+const mapHistoryDonors = (donors?: ApiHistoryDonor[] | null): HistoryDonor[] =>
+  (donors ?? []).map((d) => ({
+    initial: d.initial,
+    name: d.pseudonym,
+    bid: d.is_quit ? null : d.bid_amount,
+    matched: d.is_quit ? null : d.matched_amount,
+    isQuit: d.is_quit,
+  }));
 
 interface RoundData {
   id: number;
@@ -92,7 +125,7 @@ interface PgaGroup {
 const COLORS = ['#E6F4F2', '#FFF3E6', '#EEF1F4', '#F2F2F2'];
 
 // Host Summary sheet payload (see EventController::show → 'summary').
-interface SummaryGroup { name: string; min_bid: number | null; max_bid: number | null; group_total: number; }
+interface SummaryGroup { name: string; min_bid: number | null; max_bid: number | null; group_total: number; donors?: ApiHistoryDonor[]; }
 interface SummaryRound { round_number: number; status: string; groups: SummaryGroup[]; }
 interface SummaryDonor { pseudonym: string; initial: string; owed: number; payment_status: 'paid' | 'unpaid'; paid_at: string | null; }
 interface EventSummary { rounds: SummaryRound[]; donors: SummaryDonor[]; }
@@ -106,6 +139,7 @@ const ViewEvent: React.FC = () => {
 
   const [showSettings, setShowSettings]           = useState(false);
   const [selectedGroup, setSelectedGroup]         = useState<Group | null>(null);
+  const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<{ name: string; statusLabel: string; donors: HistoryDonor[] } | null>(null);
   const [ignoreZeroBids, setIgnoreZeroBids]       = useState(false);
   const [showQR, setShowQR]                       = useState(false);
   const [showAllDonors, setShowAllDonors]         = useState(false);
@@ -159,13 +193,32 @@ const ViewEvent: React.FC = () => {
 
   const eventId = new URLSearchParams(location.search).get('id');
 
-  // ─── Donor message modal (host → donor, one-way) ──────────────────────
+  // ─── Donor message modal (host ↔ donor) ──────────────────────────────
   const [msgDonor, setMsgDonor]     = useState<{ groupMemberId: number; name: string; initial: string; color: string } | null>(null);
   const [msgThread, setMsgThread]   = useState<DonorMessage[]>([]);
   const [msgBody, setMsgBody]       = useState('');
   const [msgLoading, setMsgLoading] = useState(false);
   const [msgSending, setMsgSending] = useState(false);
   const [msgError, setMsgError]     = useState<string | null>(null);
+
+  // Donors (by group_member_id) with an unread reply — drives the small dot
+  // on each All Donors row's message icon. Polled independently of the
+  // round-status poll so it works even while that donor's group is idle.
+  const [unreadDonorIds, setUnreadDonorIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!eventId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const ids = await getUnreadDonorMessageIds(Number(eventId));
+        if (!cancelled) setUnreadDonorIds(new Set(ids));
+      } catch { /* non-critical — retry next tick */ }
+    };
+    poll();
+    const id = setInterval(poll, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [eventId]);
 
   const fmtMsgTime = (iso: string) => {
     try {
@@ -180,6 +233,12 @@ const ViewEvent: React.FC = () => {
     setMsgError(null);
     setMsgThread([]);
     setMsgLoading(true);
+    setUnreadDonorIds(prev => {
+      if (!prev.has(d.groupMemberId!)) return prev;
+      const next = new Set(prev);
+      next.delete(d.groupMemberId!);
+      return next;
+    });
     try {
       setMsgThread(await getDonorMessages(Number(eventId), d.groupMemberId));
     } catch (e: any) {
@@ -188,6 +247,21 @@ const ViewEvent: React.FC = () => {
       setMsgLoading(false);
     }
   };
+
+  // While the thread modal is open, quietly refresh it so a donor's reply
+  // (or a Sent → Delivered → Seen status change) shows up live instead of
+  // only after closing and reopening. No loading spinner on these ticks —
+  // only the initial open shows one.
+  useEffect(() => {
+    if (!msgDonor || !eventId) return;
+    const id = setInterval(async () => {
+      try {
+        const fresh = await getDonorMessages(Number(eventId), msgDonor.groupMemberId);
+        setMsgThread(fresh);
+      } catch { /* transient — next tick retries */ }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [msgDonor, eventId]);
 
   const sendMsg = async () => {
     const body = msgBody.trim();
@@ -364,9 +438,11 @@ const handleEndEvent = async () => {
 
   // Host may override the round 2+ group size, only while round 1 is closed and round 2
   // has not opened yet (backend enforces the same window and returns 422 otherwise).
-  const handleSaveGroupSize = async () => {
+  // Shared by the settings-panel input AND the PGA sheet's recommended/custom size
+  // controls — refreshes pgaGroups too, so a change made while the PGA sheet is open
+  // is reflected immediately instead of showing the pre-change groups.
+  const applyGroupSize = async (size: number) => {
     if (!eventId || groupSizeSaving) return;
-    const size = Number(editGroupSize);
     if (!Number.isInteger(size) || size < 2) {
       setGroupSizeError('Enter a whole number of 2 or more.');
       return;
@@ -377,10 +453,13 @@ const handleEndEvent = async () => {
       await updateGroupSize(Number(eventId), size);
       const fresh = await getEvent(Number(eventId));
       setApiEvent(fresh);
+      if (fresh.current_groups?.length) setPgaGroups(buildPgaGroups(fresh.current_groups));
     } catch (e: any) {
       setGroupSizeError(e?.response?.data?.message ?? e?.message ?? 'Could not update group size.');
     } finally { setGroupSizeSaving(false); }
   };
+
+  const handleSaveGroupSize = () => applyGroupSize(Number(editGroupSize));
 
   // ─── Map API → local types ────────────────────────────────────────────────
   const mapGroups = (apiGroups: ApiGroup[]): Group[] =>
@@ -412,6 +491,7 @@ const handleEndEvent = async () => {
       groupRows: r.group_rows.map((row): RoundGroupRow => ({
         name: row.name, status: row.status, alert: row.alert,
         detail: row.detail, detailColor: row.detail_color,
+        donors: mapHistoryDonors((row as unknown as { donors?: ApiHistoryDonor[] }).donors),
       })),
     }));
 
@@ -714,6 +794,71 @@ const handleEndEvent = async () => {
   const pgaTotalPeople     = pgaGroups.reduce((s, g) => s + g.members.length, 0);
   const fromGroupForSheet  = pgaGroups.find(g => g.id === moveSheet.fromGroupId);
 
+  // Client-side mirror of GroupingService::chunkNoSingletons() — splits a
+  // headcount into groups of `size`, folding a trailing group of exactly 1
+  // into the one before it. Used purely to PREVIEW what each candidate size
+  // would produce; the backend is still the source of truth once applied.
+  const chunkNoSingletonsPreview = (total: number, size: number): number[] => {
+    size = Math.max(1, size);
+    if (total <= 0) return [];
+    const chunks: number[] = [];
+    let remaining = total;
+    while (remaining > 0) {
+      const take = Math.min(size, remaining);
+      chunks.push(take);
+      remaining -= take;
+    }
+    if (chunks.length > 1 && chunks[chunks.length - 1] === 1) {
+      const orphan = chunks.pop()!;
+      chunks[chunks.length - 1] += orphan;
+    }
+    return chunks;
+  };
+
+  const describeChunks = (chunks: number[]): string => {
+    if (chunks.length === 0) return 'No groups';
+    if (chunks.length === 1) return `1 group of ${chunks[0]}`;
+    const allSame = chunks.every(c => c === chunks[0]);
+    return allSame ? `${chunks.length} groups of ${chunks[0]}` : `${chunks.length} groups (${chunks.join(', ')})`;
+  };
+
+  // Group size OPTIONS for the PGA sheet: the default doubling (same rule as
+  // the backend's GroupingService::resolveRoundCapacity()), one size below,
+  // and one above — mirroring the "find the closest factor, check one above
+  // and one below" allocation algorithm. Each option is simulated through
+  // chunkNoSingletonsPreview so the host sees the actual resulting split, and
+  // whichever leaves the smallest gap between its largest and smallest group
+  // (ties broken by fewer groups, then by matching the plain-doubling
+  // default) is marked Recommended. This is a best-effort client-side mirror
+  // — it doesn't know about a prior manual override that wasn't a clean
+  // power-of-2 step from base — the host can always type a custom size too.
+  const groupSizeOptions = (() => {
+    const base = Math.max(1, Number(apiEvent?.group_size ?? 2));
+    let doubled = base;
+    while (doubled < pgaTotalPeople) doubled *= 2;
+
+    const sizes = Array.from(new Set([doubled - 1, doubled, doubled + 1].filter(n => n >= 2))).sort((a, b) => a - b);
+
+    const scored = sizes.map(size => {
+      const chunks = chunkNoSingletonsPreview(pgaTotalPeople, size);
+      const spread = chunks.length ? Math.max(...chunks) - Math.min(...chunks) : 0;
+      return { size, chunks, spread, groupCount: chunks.length };
+    });
+
+    const best = scored.reduce((a, b) => {
+      if (b.spread !== a.spread) return b.spread < a.spread ? b : a;
+      if (b.groupCount !== a.groupCount) return b.groupCount < a.groupCount ? b : a;
+      return b.size === doubled ? b : a;
+    });
+
+    return scored.map(s => ({ ...s, recommended: s.size === best.size }));
+  })();
+
+  const handleChooseGroupSize = (size: number) => {
+    setEditGroupSize(String(size));
+    applyGroupSize(size);
+  };
+
   // Close move-sheet on backdrop tap
   useEffect(() => {
     if (!moveSheet.open) return;
@@ -832,6 +977,22 @@ const handleEndEvent = async () => {
 
   // Rank donors inside a group by their bid. Only bids > 0 are ranked.
   const getDonorRankStyle = (donor: Donor, donors: Donor[]): React.CSSProperties => {
+    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    if (amounts.length === 0) return {};
+    const max = Math.max(...amounts);
+    const min = Math.min(...amounts);
+    const amt = parseAmount(donor.bid);
+    if (amt <= 0 || max === min) return {};
+    if (amt === max) return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
+    if (amt === min) return { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D'  };
+    return { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' };
+  };
+
+  // Same rank colouring, for the Round Overview / Summary history drill-down.
+  // Kept as its own function (rather than reusing getDonorRankStyle) since
+  // HistoryDonor is a distinct shape from Donor — logic is intentionally
+  // identical so the host sees one consistent convention everywhere.
+  const getHistoryDonorRankStyle = (donor: HistoryDonor, donors: HistoryDonor[]): React.CSSProperties => {
     const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
     if (amounts.length === 0) return {};
     const max = Math.max(...amounts);
@@ -1405,6 +1566,7 @@ const handleCopy = async (text: string, field: string) => {
                               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                                 <path d="M3 4.5h12a1 1 0 011 1V12a1 1 0 01-1 1H7l-3 2.5V13H3a1 1 0 01-1-1V5.5a1 1 0 011-1z" stroke="#2BA7A0" strokeWidth="1.4" strokeLinejoin="round"/>
                               </svg>
+                              {unreadDonorIds.has(donor.groupMemberId) && <span className="ve-donor-msg-dot" />}
                             </button>
                           ) : null}
                           <span className="ve-donor-remove">⊗</span>
@@ -1455,12 +1617,14 @@ const handleCopy = async (text: string, field: string) => {
                   : msgThread.length === 0
                     ? <div className="ve-msg-empty">No messages yet. Send the first one below.</div>
                     : msgThread.map(m => (
-                        <div key={m.id} className="ve-msg-bubble">
+                        <div key={m.id} className={`ve-msg-bubble${m.from === 'donor' ? ' ve-msg-bubble--donor' : ''}`}>
                           <p className="ve-msg-bubble-body">{m.body}</p>
                           <div className="ve-msg-bubble-meta">
-                            <span className={`ve-msg-status ve-msg-status--${m.status}`}>
-                              {m.status === 'seen' ? 'Seen' : m.status === 'delivered' ? 'Delivered' : 'Sent'}
-                            </span>
+                            {m.from === 'donor'
+                              ? <span className="ve-msg-status ve-msg-status--donor">Reply</span>
+                              : <span className={`ve-msg-status ve-msg-status--${m.status}`}>
+                                  {m.status === 'seen' ? 'Seen' : m.status === 'delivered' ? 'Delivered' : 'Sent'}
+                                </span>}
                             <span className="ve-msg-time">{fmtMsgTime(m.created_at)}</span>
                           </div>
                         </div>
@@ -1569,7 +1733,16 @@ const handleCopy = async (text: string, field: string) => {
                   <div className="ve-ro-divider" />
                   <div className="ve-ro-group-list">
                     {activeRound.groupRows.map((g, i) => (
-                      <div key={i} className="ve-ro-group-row">
+                      <div
+                        key={i}
+                        className="ve-ro-group-row"
+                        style={{ cursor: g.donors.length ? 'pointer' : 'default' }}
+                        onClick={() => g.donors.length && setSelectedHistoryGroup({
+                          name: g.name,
+                          statusLabel: g.status === 'done' ? 'Complete' : g.status === 'pending' ? 'In Progress' : 'Not Started',
+                          donors: g.donors,
+                        })}
+                      >
                         <div className="ve-ro-group-left"><RowStatusIcon status={g.status} /><span className="ve-ro-group-name">{g.name}</span></div>
                         <span className="ve-ro-group-detail" style={{ color: g.detailColor ?? '#C5C8CC' }}>{g.detail ?? '–'}</span>
                       </div>
@@ -1600,7 +1773,16 @@ const handleCopy = async (text: string, field: string) => {
                   <div key={r.round_number}>
                     <div className="ve-donor-group-label">Round {r.round_number}</div>
                     {r.groups.length > 0 ? r.groups.map((g, gi) => (
-                      <div key={gi} className="ve-ro-group-row">
+                      <div
+                        key={gi}
+                        className="ve-ro-group-row"
+                        style={{ cursor: g.donors?.length ? 'pointer' : 'default' }}
+                        onClick={() => g.donors?.length && setSelectedHistoryGroup({
+                          name: g.name,
+                          statusLabel: `Round ${r.round_number}`,
+                          donors: mapHistoryDonors(g.donors),
+                        })}
+                      >
                         <div className="ve-ro-group-left"><span className="ve-ro-group-name">{g.name}</span></div>
                         <span className="ve-ro-group-detail" style={{ color: '#2BA7A0' }}>
                           Min {g.min_bid != null ? `£${g.min_bid}` : '–'} · Max {g.max_bid != null ? `£${g.max_bid}` : '–'} · Total £{g.group_total}
@@ -1668,6 +1850,40 @@ const handleCopy = async (text: string, field: string) => {
           </>
         )}
 
+        {/* ══ History Group Detail Sheet (Round Overview / Summary drill-down) ══
+            Shows a past round's group members: each donor's bid that round and
+            the matched amount, distinct from selectedGroup which is for the
+            live/current round only. */}
+        {selectedHistoryGroup && (
+          <>
+            <div className="ve-backdrop" onClick={() => setSelectedHistoryGroup(null)} />
+            <div className="ve-sheet">
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">{selectedHistoryGroup.name}</h3>
+                <span className="ve-sheet-badge badge-done">{selectedHistoryGroup.statusLabel}</span>
+              </div>
+              <div className="ve-donor-list">
+                {selectedHistoryGroup.donors.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 24, color: '#9AA0A6' }}>No donor data for this group</div>
+                )}
+                {selectedHistoryGroup.donors.map((donor, i) => (
+                  <div key={i} className="ve-donor-row" style={getHistoryDonorRankStyle(donor, selectedHistoryGroup.donors)}>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>{donor.initial}</div>
+                    <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span></div>
+                    <div className="ve-donor-right">
+                      {donor.isQuit
+                        ? <span className="ve-donor-bidding">Left</span>
+                        : <span className="ve-donor-bid">{donor.bid ?? '—'}{donor.matched ? ` · Matched ${donor.matched}` : ''}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="ve-sheet-close" onClick={() => setSelectedHistoryGroup(null)}>Close</div>
+            </div>
+          </>
+        )}
+
         {/* ══════════════════════════════════════════════════════════════════════
             PROPOSED GROUP ALLOCATIONS SHEET
             Shows after round closes. Host reviews groups, selects members
@@ -1690,6 +1906,57 @@ const handleCopy = async (text: string, field: string) => {
                 <span className="ve-pga-total">Total: {pgaTotalPeople} people</span>
                 <button className="ve-pga-rebalance-btn" onClick={pgaRebalance}>Rebalance</button>
               </div>
+
+              {/* Group size OPTIONS — only while the host is still allowed to change it
+                  (same window RoundController::updateGroupSize enforces). */}
+              {(apiEvent as any)?.can_change_group_size && (
+                <div style={{ padding: '0 16px 8px' }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#1A1A2E', marginBottom: 8 }}>
+                    Group size options
+                  </div>
+                  <div className="ve-pga-summary-bar" style={{ flexWrap: 'wrap', gap: 8, rowGap: 8, padding: 0 }}>
+                    {groupSizeOptions.map(opt => (
+                      <button
+                        key={opt.size}
+                        className="ve-pga-rebalance-btn"
+                        disabled={groupSizeSaving}
+                        style={{
+                          opacity: groupSizeSaving ? 0.6 : 1,
+                          cursor: groupSizeSaving ? 'not-allowed' : 'pointer',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                          padding: '8px 14px',
+                          border: opt.recommended ? '2px solid #16837E' : '2px solid transparent',
+                        }}
+                        onClick={() => handleChooseGroupSize(opt.size)}
+                      >
+                        <span>{opt.size}{opt.recommended ? ' · Recommended' : ''}</span>
+                        <span style={{ fontSize: 11, fontWeight: 400 }}>{describeChunks(opt.chunks)}</span>
+                      </button>
+                    ))}
+                    <input
+                      className="ve-config-input"
+                      type="number"
+                      min={2}
+                      placeholder="Custom size"
+                      value={editGroupSize}
+                      onChange={(e) => setEditGroupSize(e.target.value)}
+                      disabled={groupSizeSaving}
+                      style={{ width: 90 }}
+                    />
+                    <button
+                      className="ve-pga-rebalance-btn"
+                      disabled={groupSizeSaving}
+                      style={{ opacity: groupSizeSaving ? 0.6 : 1, cursor: groupSizeSaving ? 'not-allowed' : 'pointer' }}
+                      onClick={handleSaveGroupSize}
+                    >
+                      {groupSizeSaving ? 'Updating…' : 'Apply custom size'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {groupSizeError && (
+                <div style={{ color: '#E53E3E', fontSize: 13, padding: '0 16px 8px' }}>{groupSizeError}</div>
+              )}
 
               {/* Scrollable group list */}
               <div className="ve-pga-group-list">

@@ -19,6 +19,7 @@ export interface AuthUser {
   role: UserRole;
   avatar?: string;
   pseudonym?: string;
+  last_visited_path?: string | null;
 }
 
 export interface LoginPayload {
@@ -156,4 +157,43 @@ export function setRole(role: string): void {
 
 export function getPendingRole(): string | null {
   return localStorage.getItem('pending_role');
+}
+
+/**
+ * Reports the current in-app path to the server so it can be restored on a
+ * future login (even after logging out, or on a different device) — see
+ * AuthController::updateLastVisited(). Fire-and-forget: a failed report
+ * (offline, validation rejection, etc.) should never interrupt navigation,
+ * so errors are silently ignored, same convention as useSessionHeartbeat.
+ */
+export function reportLastVisited(path: string): void {
+  if (!isAuthenticated()) return;
+  api.patch('/user/last-visited', { path }).catch(() => { /* intentionally ignored */ });
+}
+
+/* Paths that should never be treated as a "resume here" destination — the
+   root redirect itself, and every public/auth screen. Landing back on one
+   of these wouldn't help a returning donor and "/" would loop. */
+const RESUME_EXCLUDED_PATHS = ['/', '/login', '/register', '/join', '/qr', '/forgot-password', '/reset-password'];
+
+/**
+ * Validated last_visited_path for a donor, or null if there isn't one (or
+ * it fails validation — must be a same-origin relative path, matching the
+ * backend's own guard against open-redirect values). Host accounts never
+ * get a resume path — this feature is donor-specific per the requirement.
+ * Shared by both App.tsx's root "/" redirect and Login.tsx's post-login
+ * routing, so there's exactly one place this rule is defined.
+ */
+export function getResumePath(user: AuthUser | null): string | null {
+  if (!user || user.role !== 'donor') return null;
+  const last = user.last_visited_path;
+  if (
+    last &&
+    last.startsWith('/') &&
+    !last.startsWith('//') &&
+    !RESUME_EXCLUDED_PATHS.includes(last.split('?')[0])
+  ) {
+    return last;
+  }
+  return null;
 }

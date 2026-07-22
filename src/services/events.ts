@@ -303,6 +303,7 @@ export async function markNotificationsRead(): Promise<void> {
 export interface DonorMessage {
   id:           number;
   body:         string;
+  from:         'host' | 'donor';
   status:       'sent' | 'delivered' | 'seen';
   delivered_at: string | null;
   read_at:      string | null;
@@ -314,6 +315,14 @@ export interface PendingMessage {
   event_id:   number;
   event_name: string | null;
   body:       string;
+  created_at: string;
+}
+
+/** Reply sent from a donor back to the host (one-way response, no thread view on the donor side yet). */
+export interface DonorReply {
+  id:         number;
+  body:       string;
+  from:       'donor';
   created_at: string;
 }
 
@@ -352,4 +361,21 @@ export async function getPendingMessages(): Promise<PendingMessage[]> {
 /** Donor: mark messages seen once viewed/dismissed. */
 export async function ackMessages(ids: number[]): Promise<void> {
   await api.post('/donor/messages/ack', { ids });
+}
+
+/** Donor: reply to the host within one event. */
+export async function replyToHost(eventId: number, body: string): Promise<DonorReply> {
+  const { data } = await api.post<{ message: DonorReply }>(
+    `/donor/events/${eventId}/messages/reply`,
+    { body },
+  );
+  return data.message;
+}
+
+/** Host: which donors (group_member_id) have an unread reply, for the All Donors unread dot. */
+export async function getUnreadDonorMessageIds(eventId: number): Promise<number[]> {
+  const { data } = await api.get<{ group_member_ids: number[] }>(
+    `/host/events/${eventId}/donors/unread-messages`,
+  );
+  return data.group_member_ids;
 }

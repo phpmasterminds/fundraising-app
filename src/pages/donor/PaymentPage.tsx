@@ -22,6 +22,7 @@ const PaymentPage: React.FC = () => {
   const [marking, setMarking] = useState(false);
   const [paid, setPaid] = useState(false);
   const [paidAt, setPaidAt] = useState<string>('');
+  const [expandedRound, setExpandedRound] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -123,7 +124,7 @@ const PaymentPage: React.FC = () => {
                 <p className="pp-rc-diff-desc">Through peer matching, your £{summary.total_amount} donation helped raise funds for {charityName === '—' ? 'the charity' : charityName}.</p>
               </div>
 
-              <button className="pp-btn pp-btn--teal" onClick={() => history.replace('/devents')}>Back to events</button>
+              <button className="pp-btn pp-btn--teal" onClick={() => history.replace('/devents')}>Back to Events</button>
               <div style={{ height: 48 }} />
             </div>
           ) : alreadyPaid ? (
@@ -149,13 +150,51 @@ const PaymentPage: React.FC = () => {
 
               {summary.rounds_detail.length > 0 && (
                 <div className="pp-card">
-                  <p className="pp-card-title">Matched by round</p>
-                  {summary.rounds_detail.map((r) => (
-                    <div className="pp-row" key={r.round}>
-                      <span>Round {r.round}</span>
-                      <span className="pp-row-val">£{r.matched}</span>
-                    </div>
-                  ))}
+                  <p className="pp-card-title">Round Summaries</p>
+                  {summary.rounds_detail.map((r) => {
+                    const hasBids = !!r.group_bids && r.group_bids.length > 0;
+                    const isOpen = hasBids && expandedRound === r.round;
+                    return (
+                      <div className="pp-rs-round" key={r.round}>
+                        <button
+                          type="button"
+                          className="pp-rs-round-head"
+                          onClick={() => hasBids && setExpandedRound(isOpen ? null : r.round)}
+                        >
+                          <span className="pp-rs-round-lbl">
+                            Round {r.round}{r.group_name ? ` · ${r.group_name}` : ''}
+                          </span>
+                          <span className="pp-rs-round-right">
+                            <span className="pp-row-val">£{r.matched}</span>
+                            {hasBids && (
+                              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                                style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
+                                <path d="M4 6l4 4 4-4" stroke="#9AA0A6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </span>
+                        </button>
+
+                        {isOpen && (
+                          <div className="pp-rs-bids">
+                            {r.group_bids!.map((b, i) => (
+                              <div
+                                key={i}
+                                className={`pp-rs-bid ${b.is_minimum ? 'pp-rs-bid--min' : ''} ${b.is_you ? 'pp-rs-bid--you' : ''}`}
+                              >
+                                <div className={`pp-rs-avatar ${b.is_you ? 'pp-rs-avatar--you' : b.is_minimum ? 'pp-rs-avatar--min' : ''}`}>
+                                  {b.initial}
+                                </div>
+                                <span className="pp-rs-name">{b.is_you ? 'You' : b.pseudonym}</span>
+                                <span className={`pp-rs-amount ${b.is_minimum ? 'pp-rs-amount--min' : ''}`}>£{b.amount}</span>
+                                {b.is_minimum && <span className="pp-rs-min-badge">min</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="pp-divider" />
                   <div className="pp-row pp-row--total">
                     <span>Total</span>
@@ -230,6 +269,24 @@ const PaymentPage: React.FC = () => {
           .pp-rc-diff-header{ margin-bottom:6px; }
           .pp-rc-diff-title{ font-size:15px; font-weight:700; color:#1A1A2E; }
           .pp-rc-diff-desc{ font-size:13px; color:#5B6068; line-height:1.5; margin:0; }
+
+          .pp-rs-round{ border-bottom:1px solid #F1F2F6; }
+          .pp-rs-round:last-of-type{ border-bottom:none; }
+          .pp-rs-round-head{ width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px; background:none; border:none; padding:10px 0; font-family:'Outfit',sans-serif; cursor:pointer; text-align:left; }
+          .pp-rs-round-lbl{ font-size:14px; color:#1A1A2E; }
+          .pp-rs-round-right{ display:flex; align-items:center; gap:8px; }
+          .pp-rs-bids{ padding:2px 0 10px; }
+          .pp-rs-bid{ display:flex; align-items:center; gap:10px; padding:7px 10px; border:1px solid #F1F2F6; border-radius:16px; background:#F8F9FB; margin-bottom:8px; }
+          .pp-rs-bid:last-child{ margin-bottom:0; }
+          .pp-rs-bid--min{ background:#FFF5EC; }
+          .pp-rs-bid--you{ background:#EAF6F5; }
+          .pp-rs-avatar{ width:30px; height:30px; border-radius:50%; background:#F1F2F6; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#9AA0A6; flex-shrink:0; }
+          .pp-rs-avatar--min{ background:#FFE8D4; color:#C4821F; border:1.5px solid #FCB040; }
+          .pp-rs-avatar--you{ background:#C8EDE9; color:#16837E; border:1.5px solid #2BA7A0; }
+          .pp-rs-name{ flex:1; font-size:13px; font-weight:600; color:#1A1A2E; }
+          .pp-rs-amount{ font-size:13px; font-weight:700; color:#1A1A2E; }
+          .pp-rs-amount--min{ color:#C4821F; }
+          .pp-rs-min-badge{ background:#FFF0E0; color:#C4821F; font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; border:1px solid #FCB040; }
         `}</style>
       </IonContent>
     </IonPage>

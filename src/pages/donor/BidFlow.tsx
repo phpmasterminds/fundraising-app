@@ -15,6 +15,7 @@ import {
   type RoundState,
   type PaymentSummary,
 } from '../../services/donorEvents';
+import { isOffline, onConnectionChange } from '../../services/connectionStatus';
 import './BidFlow.css';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import 'swiper/css';
@@ -62,7 +63,10 @@ const BidFlow: React.FC = () => {
   const [submitting,    setSubmitting]   = useState(false);
   const [submitError,   setSubmitError]  = useState('');
 
-  // Persist last bid across rounds — keyed by eventId so it's per-event
+  // Remembers the donor's most recent bid across rounds, keyed by eventId, so the
+  // input pre-fills with it instead of resetting to 0 (e.g. on page refresh, or
+  // when a new round's bid screen loads). NOT a floor — a donor can freely raise
+  // or lower their bid any number of times until the round closes (Slide 10).
   const lsKey = `peerfund_lastbid_${stateEventId}`;
   const [lastBidAmount, setLastBidAmountState] = useState<number>(() => {
     const saved = localStorage.getItem(lsKey);
@@ -76,6 +80,36 @@ const BidFlow: React.FC = () => {
   const [currentRound,  setCurrentRound] = useState(1);
   const [roundData,     setRoundData]    = useState<RoundState | null>(null);
   const [groupBidsOpen, setGroupBidsOpen]= useState(false);
+
+  // Slide 17 — disconnect notice. Mirrors useSessionHeartbeat's connectivity
+  // flag; clears itself automatically the moment a heartbeat ping succeeds
+  // again (the auto-reconnect already happening under the hood, not
+  // something this screen drives).
+  const [disconnected, setDisconnected] = useState(() => isOffline());
+  useEffect(() => onConnectionChange(setDisconnected), []);
+
+  // This file has many separate early-return screen states (checking,
+  // waiting, confirm-bid, results, etc.), so rather than duplicating a
+  // banner into every JSX branch, manage one fixed-position DOM node
+  // directly, appended to document.body — same "escape IonContent via
+  // document.body" principle this codebase already uses for modals, just
+  // via direct DOM APIs since there's no single shared JSX return point here.
+  useEffect(() => {
+    let el: HTMLDivElement | null = null;
+    if (disconnected) {
+      el = document.createElement('div');
+      el.setAttribute('data-peerfund-offline-banner', '1');
+      Object.assign(el.style, {
+        position: 'fixed', top: '0', left: '0', right: '0', zIndex: '99999',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+        background: '#FFF4E5', borderBottom: '1px solid #FCB040', color: '#8A5A00',
+        padding: '10px 14px', fontSize: '13px', fontWeight: '500', textAlign: 'center',
+      });
+      el.textContent = "⚠️ You've been disconnected — trying to reconnect…";
+      document.body.appendChild(el);
+    }
+    return () => { el?.remove(); };
+  }, [disconnected]);
 
   // Server-seeded timers
   const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
@@ -425,7 +459,20 @@ const BidFlow: React.FC = () => {
           setGroupBidsOpen(false);
           setScreen('round-results'); return;
         }
-        // still 'open' — keep polling
+        // Genuinely still 'open' with real time left — this is NOT the round
+        // ending, it's the local countdown having drifted from the server
+        // (e.g. the device was offline for a while and this timer kept
+        // ticking locally, hit 0, and got here on a network error). Resync
+        // to the server's authoritative value and hand back to the normal
+        // per-second countdown (Effect 4) instead of looping here forever.
+        if (res.round_status === 'open' && res.seconds_left !== null && res.seconds_left > 0) {
+          clearInterval(pollRef.current);
+          setRoundSecsLeft(res.seconds_left);
+          setRoundEnding(false);
+          return;
+        }
+        // still genuinely at the boundary (open with ~0s left, host hasn't
+        // closed yet) — keep polling
       } catch (_) {}
     }, 2000);
     return () => clearInterval(pollRef.current);
@@ -763,12 +810,30 @@ const BidFlow: React.FC = () => {
 
   /* ══════ HANDLERS ══════ */
 
+  // Floor for the CURRENT round's bid: the donor's own final bid from the
+  // PREVIOUS round (round 1 has no previous round, so no floor there).
+  // Derived fresh each render from the round history the backend returns —
+  // this is what actually implements "round N's minimum is my round N-1 bid,"
+  // distinct from lastBidAmount below (a refresh-safe pre-fill convenience,
+  // not a rule). Within the current round the donor can move freely above
+  // (or, once submitted, back down to) this floor as many times as they like
+  // until the round closes.
+  const roundFloor = (() => {
+    const prevRoundBid = (roundData as any)?.all_round_bids?.find(
+      (r: any) => r.round_number === currentRound - 1
+    );
+    return prevRoundBid ? Number(prevRoundBid.amount) || 0 : 0;
+  })();
+
   const handlePlaceBid = async () => {
     if (submitting) return;
     if (roundSecsLeft !== null && roundSecsLeft <= 0) { setSubmitError('Round has ended. Bidding is closed.'); return; }
     setSubmitError('');
     if (ignoreZeroBids && (!bidAmount || bidAmount <= 0)) { setSubmitError('Please enter a bid amount.'); return; }
-    if (lastBidAmount > 0 && bidAmount < lastBidAmount) { setSubmitError(`Bid must be at least £${lastBidAmount} (your previous bid).`); return; }
+    if (roundFloor > 0 && bidAmount < roundFloor) {
+      setSubmitError(`Bid must be at least £${roundFloor} (your Round ${currentRound - 1} bid).`);
+      return;
+    }
     setSubmitting(true);
     try {
       await submitBid(eventId, bidAmount);
@@ -808,7 +873,7 @@ const confirmQuit = async () => {
   };
 
   const adjustBid = (delta: number) => {
-    setBidAmount(prev => { const n = Math.max(lastBidAmount, prev + delta); setInputVal(String(n)); return n; });
+    setBidAmount(prev => { const n = Math.max(roundFloor, prev + delta); setInputVal(String(n)); return n; });
   };
 
   /* ── Derived ─────────────────────────────────────────────────────── */
@@ -1075,7 +1140,7 @@ const confirmQuit = async () => {
       <div className="bf-s2">
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
         <div className="bf-amount-zone">
-          <p className="bf-amount-hint">Type your bid{lastBidAmount > 0 ? ` (min £${lastBidAmount})` : ''}</p>
+          <p className="bf-amount-hint">Type your bid{roundFloor > 0 ? ` (min £${roundFloor})` : ''}</p>
           <div className="bf-amount-display">
             <span className="bf-pound">£</span>
 				<input className="bf-amount-input" type="text" value={bidDisplay}
@@ -1084,12 +1149,11 @@ const confirmQuit = async () => {
 				if (raw !== '' && !/^\d+$/.test(raw)) return;
 				setInputVal(raw);
 				const n = parseInt(raw, 10);
-				if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
+				if (!isNaN(n)) setBidAmount(Math.max(roundFloor, n));
 			  }}
 			  onBlur={() => {
 				const n = parseInt(inputVal.replace(/,/g, ''), 10);
-				if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
-				else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+				if (isNaN(n) || n < roundFloor) { setBidAmount(roundFloor); setInputVal(String(roundFloor)); }
 			  }}
 			  inputMode="numeric" style={{ flexShrink:0, fontSize: bidEntryScale < 1 ? `${bidEntryScale}em` : undefined, width: `${bidLen}ch` }} />
           </div>
@@ -1144,12 +1208,11 @@ const confirmQuit = async () => {
                 if (raw !== '' && !/^\d+$/.test(raw)) return; // digits only — block any characters
                 setInputVal(raw);
                 const n = parseInt(raw, 10);
-                if (!isNaN(n)) setBidAmount(Math.max(lastBidAmount, n));
+                if (!isNaN(n)) setBidAmount(Math.max(roundFloor, n));
               }}
               onBlur={() => {
                 const n = parseInt(inputVal.replace(/,/g, ''), 10);
-                if (isNaN(n) || n < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
-                else if (bidAmount < lastBidAmount) { setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount)); }
+                if (isNaN(n) || n < roundFloor) { setBidAmount(roundFloor); setInputVal(String(roundFloor)); }
               }}
               inputMode="numeric"
               aria-label="Your bid amount"
@@ -1259,14 +1322,8 @@ const confirmQuit = async () => {
           )}
         </div>
         <div className="bf-card bf-group-bids-card">
-          <button className="bf-group-bids-toggle" onClick={() => setGroupBidsOpen(o => !o)}>
-            <span className="bf-card-title" style={{ margin: 0 }}>View Group Bids (Anonymous)</span>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"
-              style={{ transform: groupBidsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-              <path d="M6 8l4 4 4-4" stroke="#9AA0A6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-          {groupBidsOpen && (() => {
+          <span className="bf-card-title" style={{ margin: 0, display: 'block' }}>Group Bids</span>
+          {(() => {
             // myGroup.members is the authoritative scoped membership for this donor's group.
             // round_bids from the API can contain ALL round participants (unscoped), so we
             // derive the displayed list from myGroup.members and pull each member's amount
@@ -1286,25 +1343,28 @@ const confirmQuit = async () => {
                   };
                 })
               : roundBids;
-            // Determine highest and lowest amounts for colour coding
+            // Binary colour rule (Slide 11) — compared within this group only:
+            //   red   = the lowest NON-ZERO bid (ties all shown red), and every zero bid
+            //   green = everyone else
+            // No middle/neutral tier — matches GroupCard's youRankColor exactly, so a
+            // donor sees the same rank convention here as during active bidding.
             const amounts = bidsToShow.map((b: any) => b.amount).filter((a: number) => a > 0);
-            const maxAmt = amounts.length > 0 ? Math.max(...amounts) : -1;
             const minAmt = amounts.length > 0 ? Math.min(...amounts) : -1;
             return (
               <div className="bf-group-bids-list">
                 {bidsToShow.map((b: any, i: number) => {
-                  const isHighest = b.amount > 0 && b.amount === maxAmt;
-                  const isLowest  = b.amount > 0 && b.amount === minAmt && maxAmt !== minAmt;
-                  const avatarStyle: React.CSSProperties = isHighest
-                      ? { background: 'teal', color: '#fff', border: '1.5px solid #4CAF50' }
-                      : isLowest
+                  const noBidsYet = minAmt < 0;
+                  const isRed = !noBidsYet && (b.amount <= 0 || b.amount === minAmt);
+                  const avatarStyle: React.CSSProperties = noBidsYet
+                      ? {}
+                      : isRed
                         ? { background: '#EF5350', color: '#fff', border: '1.5px solid #EF5350' }
-                        : {};
-                  const rowStyle: React.CSSProperties = isHighest
-                      ? { background: '#EAF6F5' , border: '2px solid #2BA7A0' }
-                      : isLowest
-                        ? { background: '#FEF2F2' , border: '2px solid #D77F5A' }
-                        : {};
+                        : { background: '#2BA7A0', color: '#fff', border: '1.5px solid #2BA7A0' };
+                  const rowStyle: React.CSSProperties = noBidsYet
+                      ? {}
+                      : isRed
+                        ? { background: '#FEF2F2', border: '2px solid #D77F5A' }
+                        : { background: '#EAF6F5', border: '2px solid #2BA7A0' };
                   return (
                     <div key={i} className="bf-bid-row" style={rowStyle}>
                       <div className="bf-bid-avatar" style={avatarStyle}>{b.initial}</div>

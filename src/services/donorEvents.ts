@@ -82,7 +82,12 @@ export interface PaymentSummary {
   charity_link:   string | null;
   reference:      string;
   date:           string;
-  rounds_detail:  { round: number; matched: number }[];
+  rounds_detail:  {
+    round:       number;
+    matched:     number;
+    group_name?: string | null;
+    group_bids?: RoundBid[];
+  }[];
   payment_status: 'paid' | 'unpaid'; // whether donor has already paid
 }
 

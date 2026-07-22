@@ -2,7 +2,7 @@ import { IonPage, IonContent } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { login } from '../../../services/auth';
+import { login, getResumePath } from '../../../services/auth';
 import type { ApiError } from '../../../services/api';
 import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './Login.css';
@@ -66,11 +66,14 @@ const Login: React.FC = () => {
         return;
       }
 
-      // Normal flow — route by role
+      // Normal flow — route by role. Donors resume their last visited page
+      // (persisted server-side — see AuthController::updateLastVisited) when
+      // there is one; falls back to the default list otherwise.
       if (user.role === 'host') {
         router.push('/events', 'root', 'replace');
       } else {
-        router.push('/devents', 'root', 'replace');
+        const resume = getResumePath(user);
+        router.push(resume ?? '/devents', 'root', 'replace');
       }
     } catch (err) {
       const apiErr = err as ApiError;

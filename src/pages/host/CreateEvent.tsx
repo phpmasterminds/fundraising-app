@@ -546,7 +546,7 @@ const CreateEvent: React.FC = () => {
           {/* Round & Group Size — side by side */}
           <div className="row gap-20">
             <div className="col">
-              <label>Round</label>
+              <label>Rounds</label>
               <div className="round-box">
                 <button onClick={() => setRoundsCount(prev => Math.max(1, prev - 1))} disabled={loading}>
                   <img src={`${imgBase}/minus.svg`} alt="-" />
@@ -558,7 +558,7 @@ const CreateEvent: React.FC = () => {
               </div>
             </div>
             <div className="col">
-              <label>No. of people in group</label>
+              <label>First Round Group Size</label>
               <div className="round-box">
                 <button onClick={() => setGroupSize(prev => Math.max(2, prev - 1))} disabled={loading}>
                   <img src={`${imgBase}/minus.svg`} alt="-" />

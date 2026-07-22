@@ -1567,58 +1567,58 @@
     }
     /* center */
     
-    .swiper-slide-active {
+    .stack-carousel .swiper-slide-active {
         z-index: 50 !important;
     }
     
-    .swiper-slide-active .stack-img {
+    .stack-carousel .swiper-slide-active .stack-img {
         transform: scale(1);
     }
     /* left */
     
-    .swiper-slide-prev {
+    .stack-carousel .swiper-slide-prev {
         z-index: 30 !important;
     }
     
-    .swiper-slide-prev .stack-img {
+    .stack-carousel .swiper-slide-prev .stack-img {
         transform: translateX(78px) scale(.82);
     }
     /* right */
     
-    .swiper-slide-next {
+    .stack-carousel .swiper-slide-next {
         z-index: 30 !important;
     }
     
-    .swiper-slide-next .stack-img {
+    .stack-carousel .swiper-slide-next .stack-img {
         transform: translateX(-78px) scale(.82);
     }
     /* far left */
     
-    .swiper-slide-prev-prev {
+    .stack-carousel .swiper-slide-prev-prev {
         z-index: 10 !important;
     }
     
-    .swiper-slide-prev-prev .stack-img {
+    .stack-carousel .swiper-slide-prev-prev .stack-img {
         transform: translateX(150px) scale(.66);
         opacity: .95;
     }
     /* far right */
     
-    .swiper-slide-next-next {
+    .stack-carousel .swiper-slide-next-next {
         z-index: 10 !important;
     }
     
-    .swiper-slide-next-next .stack-img {
+    .stack-carousel .swiper-slide-next-next .stack-img {
         transform: translateX(-150px) scale(.66);
         opacity: .95;
     }
     /* hide rest */
     
-    .swiper-slide:not(.swiper-slide-active):not(.swiper-slide-prev):not(.swiper-slide-next):not(.swiper-slide-prev-prev):not(.swiper-slide-next-next) {
+    .stack-carousel .swiper-slide:not(.swiper-slide-active):not(.swiper-slide-prev):not(.swiper-slide-next):not(.swiper-slide-prev-prev):not(.swiper-slide-next-next) {
         opacity: 0;
     }
     
-    .swiper-pagination-bullet-active {
+    .stack-carousel .swiper-pagination-bullet-active {
         background: #CCCCCC !important;
     }
     /* pagination wrapper */
@@ -1777,4 +1777,43 @@
     font-weight: 500;
     color: #25201D;
     letter-spacing: -0.2px;
+}
+
+/* ═══════════════════════════════════
+   GROUP CARD — Avatar Swiper (5+ members)
+   Scopes the pagination for the avatar
+   slider used in GroupCard so its dots
+   sit in normal flow, centered below the
+   cards, instead of Swiper's default
+   absolute-positioned bullets overlapping
+   the last visible card.
+═══════════════════════════════════ */
+
+.bf-avatar-swiper {
+    overflow: hidden;
+}
+
+.bf-avatar-swiper .swiper-pagination {
+    position: relative !important;
+    margin-top: 10px;
+    bottom: 0 !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+}
+
+.bf-avatar-swiper .swiper-pagination-bullet {
+    width: 5px;
+    height: 5px;
+    margin: 0 !important;
+    border-radius: 50%;
+    background: #25201D !important;
+    opacity: .1 !important;
+    transition: all .25s ease;
+}
+
+.bf-avatar-swiper .swiper-pagination-bullet-active {
+    opacity: .6 !important;
+    transform: scale(1.1);
 }

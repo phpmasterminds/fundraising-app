@@ -5,6 +5,7 @@ import './DEventList.css';
 import DonorHeader from '../../components/DonorHeader';
 import { getDonorEvents, logoUrl, Event, DonorEventTab } from '../../services/events';
 import { getEventByCode } from '../../services/donorEvents';
+import { isOffline, onConnectionChange } from '../../services/connectionStatus';
 
 // ── Helpers ───────────────────────────────────────────────────────
 const imgBase = import.meta.env.VITE_ASSETS_URL;
@@ -59,7 +60,14 @@ const DEventList: React.FC = () => {
   const [codeError, setCodeError]         = useState<string | null>(null);
   // tick state — increments every second to force re-render of countdowns
   const [tick, setTick]                   = useState(0);
+  // Slide 17 — reflects useSessionHeartbeat's connectivity flag so the donor
+  // sees when they've disconnected, and it clears itself the moment a
+  // heartbeat ping succeeds again (the auto-reconnect already happening
+  // under the hood, not a separate mechanism this screen drives).
+  const [disconnected, setDisconnected]   = useState(() => isOffline());
   const codeInputRef                      = useRef<HTMLInputElement>(null);
+
+  useEffect(() => onConnectionChange(setDisconnected), []);
 
   // ── Fetch events ──────────────────────────────────────────────
 // ── Fetch events + Auto Refresh ──────────────────────────────
@@ -154,6 +162,18 @@ useEffect(() => {
             username="John Doe 🐰"
             onUsernameClick={() => router.push('/profile')}
           />
+
+          {/* ── Slide 17: disconnect notice ── */}
+          {disconnected && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: '#FFF4E5', border: '1px solid #FCB040', color: '#8A5A00',
+              borderRadius: 12, padding: '10px 14px', margin: '12px 0', fontSize: 13, fontWeight: 500,
+            }}>
+              <span aria-hidden="true">⚠️</span>
+              <span>You've been disconnected — trying to reconnect…</span>
+            </div>
+          )}
 
           {/* ── Tabs ── */}
           <div className="tabs">

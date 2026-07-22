@@ -1679,6 +1679,7 @@
 ══════════════════════════════════ */
 
 .ve-donor-msg-btn {
+    position: relative;
     width: 26px;
     height: 26px;
     border-radius: 50%;
@@ -1690,6 +1691,17 @@
     cursor: pointer;
     flex-shrink: 0;
     padding: 0;
+}
+
+.ve-donor-msg-dot {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #F54A4D;
+    border: 1.5px solid #fff;
 }
 
 .ve-donor-msg-btn svg {
@@ -1772,6 +1784,25 @@
     box-shadow: 0 2px 6px rgba(43,167,160,0.18);
 }
 
+.ve-msg-bubble--donor {
+    align-self: flex-start;
+    background: #F1F2F6;
+    border-radius: 16px 16px 16px 4px;
+    box-shadow: none;
+}
+
+.ve-msg-bubble--donor .ve-msg-bubble-body {
+    color: #1A1A2E;
+}
+
+.ve-msg-bubble--donor .ve-msg-bubble-meta {
+    justify-content: flex-start;
+}
+
+.ve-msg-bubble--donor .ve-msg-time {
+    color: #9AA0A6;
+}
+
 .ve-msg-bubble-body {
     margin: 0;
     font-size: 14px;
@@ -1798,6 +1829,7 @@
 .ve-msg-status--sent      { color: rgba(255,255,255,0.7); }
 .ve-msg-status--delivered { color: #EAF6F5; }
 .ve-msg-status--seen      { color: #CFF3ED; }
+.ve-msg-status--donor     { color: #2BA7A0; }
 
 .ve-msg-time {
     font-size: 10px;

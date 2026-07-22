@@ -1,4 +1,4 @@
-import { Redirect, Route } from 'react-router-dom';
+import { Redirect, Route, useLocation } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, setupIonicReact, useIonRouter } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 import { useEffect, useState } from 'react';
@@ -35,7 +35,7 @@ import DEventList   from './pages/donor/DEventList';
 import EventView    from './pages/donor/EventView';
 import BidFlow      from './pages/donor/BidFlow';
 import PaymentPage  from './pages/donor/PaymentPage';
-import { isAuthenticated, getRole, restoreSession } from './services/auth';
+import { isAuthenticated, getRole, getUser, restoreSession, reportLastVisited, getResumePath } from './services/auth';
 import useSessionHeartbeat from './hooks/useSessionHeartbeat';
 
 setupIonicReact();
@@ -66,6 +66,41 @@ const DeepLinkHandler: React.FC = () => {
   return null;
 };
 
+/* ── Paths that should never be treated as a "resume here" destination —
+   the root redirect itself, and every public/auth screen. Kept here too
+   (matching auth.ts's RESUME_EXCLUDED_PATHS) only for LastVisitedReporter's
+   own "don't report these" check below; the actual resume-path validation
+   lives in one place, auth.ts's getResumePath(). ── */
+const RESUME_EXCLUDED_PATHS = ['/', '/login', '/register', '/join', '/qr', '/forgot-password', '/reset-password'];
+
+/* Where an authenticated user's root "/" visit should actually land.
+   Donor-specific per the requirement: return them to their last visited
+   in-app page (reported by LastVisitedReporter below and persisted
+   server-side — see AuthController::updateLastVisited), across logout/login
+   and even a different device. Falls back to the default donor/host home
+   whenever there's no usable last_visited_path. Shares its validation logic
+   with Login.tsx via auth.ts's getResumePath(), so there's one source of
+   truth instead of two copies that could drift apart. */
+function resumePathFor(role: 'host' | 'donor' | null): string {
+  if (role === 'donor') {
+    return getResumePath(getUser()) ?? '/devents';
+  }
+  return '/events';
+}
+
+/* ── Reports the current in-app path so it can be restored on a future
+   login. Skips public/auth screens (nothing meaningful to resume there)
+   and unauthenticated visits (nowhere to attach the report to). ── */
+const LastVisitedReporter: React.FC = () => {
+  const location = useLocation();
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    if (RESUME_EXCLUDED_PATHS.includes(location.pathname)) return;
+    reportLastVisited(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+  return null;
+};
+
 const App: React.FC = () => {
   useSessionHeartbeat();
 
@@ -87,12 +122,13 @@ const App: React.FC = () => {
         <DeepLinkHandler />
         <PaymentGuard />
         <DonorMessageListener />
+        <LastVisitedReporter />
         <IonRouterOutlet>
 
           {/* ── Default redirect ── */}
           <Route exact path="/">
             {isAuthenticated()
-              ? <Redirect to={getRole() === 'host' ? '/events' : '/devents'} />
+              ? <Redirect to={resumePathFor(getRole())} />
               : <Redirect to="/join" />}
           </Route>
 
