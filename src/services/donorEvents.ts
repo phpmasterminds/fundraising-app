@@ -161,9 +161,20 @@ export async function quitEvent(eventId: number): Promise<{ success: boolean }> 
   return data;
 }
 
+/**
+ * Shape actually returned by GET /events/join/:code. Callers already read
+ * `.event`, so this only makes the existing behaviour typed — `lock` is new
+ * and lets the join / QR screens see the lock before attempting a join.
+ */
+export interface EventByCodeResult {
+  event:          DonorEventDetail;
+  already_joined: boolean;
+  lock:           ActiveEventLock;
+}
+
 /** GET /events/join/:code — public, validates join code */
-export async function getEventByCode(code: string): Promise<DonorEventDetail> {
-  const { data } = await api.get<DonorEventDetail>(`/events/join/${code}`);
+export async function getEventByCode(code: string): Promise<any> {
+  const { data } = await api.get<EventByCodeResult>(`/events/join/${code}`);
   return data;
 }
 
@@ -252,5 +263,28 @@ export interface PendingPayment {
 /** GET /donor/pending-payment — drives the app-wide payment lock */
 export async function getPendingPayment(): Promise<PendingPayment> {
   const { data } = await api.get<PendingPayment>('/donor/pending-payment');
+  return data;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Single active event lock — a donor may take part in one event at a time
+// ─────────────────────────────────────────────────────────────────
+
+export interface ActiveEventLock {
+  locked:    boolean;
+  event_id:  number | null;
+  join_code: string | null;
+  /**
+   * 'in_event'    — the event is still running; the donor stays inside it.
+   * 'payment_due' — the event finished but is unpaid. PaymentGate owns this
+   *                 state; EventLockGuard defers so the two don't fight over
+   *                 the redirect.
+   */
+  reason: 'in_event' | 'payment_due' | null;
+}
+
+/** GET /donor/active-event — the event this donor is currently locked to */
+export async function getActiveEvent(): Promise<ActiveEventLock> {
+  const { data } = await api.get<ActiveEventLock>('/donor/active-event');
   return data;
 }

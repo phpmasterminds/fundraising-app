@@ -19,6 +19,7 @@ import './theme/variables.css';
 import AuthGuard    from './components/AuthGuard';
 import DonorMessageListener from './components/DonorMessageListener';
 import { PaymentGateProvider, PaymentGuard } from './components/PaymentGate';
+import { EventLockProvider, EventLockGuard } from './components/EventLockGate';
 import Join         from './pages/common/join/Join';
 import Login        from './pages/common/login/Login';
 import Register     from './pages/common/register/Register';
@@ -118,9 +119,11 @@ const App: React.FC = () => {
   return (
     <IonApp>
       <PaymentGateProvider>
+      <EventLockProvider>
       <IonReactRouter basename={BASE}>
         <DeepLinkHandler />
         <PaymentGuard />
+        <EventLockGuard />
         <DonorMessageListener />
         <LastVisitedReporter />
         <IonRouterOutlet>
@@ -175,6 +178,7 @@ const App: React.FC = () => {
 
         </IonRouterOutlet>
       </IonReactRouter>
+      </EventLockProvider>
       </PaymentGateProvider>
     </IonApp>
   );

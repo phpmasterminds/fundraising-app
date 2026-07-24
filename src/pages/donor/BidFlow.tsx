@@ -16,6 +16,7 @@ import {
   type PaymentSummary,
 } from '../../services/donorEvents';
 import { isOffline, onConnectionChange } from '../../services/connectionStatus';
+import { useLockedBack, useEventLock } from '../../components/EventLockGate';
 import './BidFlow.css';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import 'swiper/css';
@@ -44,6 +45,13 @@ const CONFETTI_COLORS = ['#2BA7A0','#2BA7A0','#2BA7A0','#1A5C58','#1A5C58','#0D3
 const BidFlow: React.FC = () => {
   const router   = useIonRouter();
   const location = useLocation<LocationState>();
+
+  // router.goBack() is a silent no-op on an empty history stack (fresh tab,
+  // deep link, hard refresh) and cannot be intercepted by EventLockGuard.
+  // useLockedBack keeps the donor inside their event while the lock is on,
+  // and behaves like a normal back once it releases.
+  const goBack = useLockedBack();
+  const { refresh: refreshLock } = useEventLock();
 
   const searchParams   = new URLSearchParams(location.search);
   const eventIdFromUrl = parseInt(searchParams.get('id') ?? '0', 10);
@@ -123,6 +131,7 @@ const BidFlow: React.FC = () => {
   const [hasQuit,      setHasQuit]      = useState<boolean>(() => localStorage.getItem(`peerfund_quit_${stateEventId}`) === '1'); // blocks bidding after quitting
   const [quitModalOpen, setQuitModalOpen] = useState(false);
   const [quitting,     setQuitting]     = useState(false);
+  const [quitError,    setQuitError]    = useState<string | null>(null);
   const [confirmBidOpen, setConfirmBidOpen] = useState(false); // confirmation modal before placing final bid
   const [thanksOpen, setThanksOpen] = useState(false); // "thanks for bidding" modal shown after placing; donor stays on the bid screen to keep editing
 
@@ -847,13 +856,24 @@ const BidFlow: React.FC = () => {
     } finally { setSubmitting(false); }
   };
 
-const handleQuit = () => setQuitModalOpen(true);
+const handleQuit = () => { setQuitError(null); setQuitModalOpen(true); };
 
 const confirmQuit = async () => {
   setQuitting(true);
+  setQuitError(null);
   try {
     await quitEvent(eventId);
-  } catch (_) {}
+  } catch (err: any) {
+    // Do NOT mark the donor as quit locally when the server call failed.
+    // is_quit would still be 0 server-side, so the single-event lock would
+    // never release — the donor would be shown a "you've quit" screen while
+    // still being held inside the event, with no way out.
+    setQuitError(
+      err?.response?.data?.message ?? 'Could not quit the event. Please try again.'
+    );
+    setQuitting(false);
+    return;
+  }
   // Lock this donor out of bidding for this event (persists across reloads)
   localStorage.setItem(`peerfund_quit_${stateEventId}`, '1');
   clearInterval(roundTimerRef.current);
@@ -862,6 +882,9 @@ const confirmQuit = async () => {
   setHasQuit(true);
   setQuitModalOpen(false);
   setQuitting(false);
+  // Release the single-event lock now rather than waiting for the next poll,
+  // so "Back to lobby" actually leaves the event instead of bouncing back.
+  refreshLock().catch(() => {});
 };
 
   const handleMarkPaid = async () => {
@@ -1002,6 +1025,11 @@ const confirmQuit = async () => {
         <p style={{ margin:'0 0 24px', fontSize:14, lineHeight:1.5, color:'#6B7280' }}>
           If you quit, you won't be able to bid in this event again. This can't be undone.
         </p>
+        {quitError && (
+          <p style={{ margin:'-14px 0 18px', fontSize:13, lineHeight:1.5, color:'#E53E3E' }}>
+            {quitError}
+          </p>
+        )}
         <div style={{ display:'flex', gap:12 }}>
           <button
             onClick={() => setQuitModalOpen(false)}
@@ -1101,7 +1129,7 @@ const confirmQuit = async () => {
         <p style={{ fontSize:14, lineHeight:1.6, color:'#9AA0A6', margin:0, maxWidth:300 }}>
           You're no longer part of {eventName || 'this event'} and can't place any further bids.
         </p>
-        <button className="bf-teal-btn bf-teal-btn--full" style={{ maxWidth:320, marginTop:8 }} onClick={() => router.goBack()}>Back to lobby</button>
+        <button className="bf-teal-btn bf-teal-btn--full" style={{ maxWidth:320, marginTop:8 }} onClick={goBack}>Back to lobby</button>
       </div>
     </IonContent></IonPage>
   );
@@ -1183,7 +1211,7 @@ const confirmQuit = async () => {
       {thanksBidModal}
       <div className="bf-s3">
         <div className="bf-s3-nav">
-          <button className="bf-back-circle" onClick={() => router.goBack()}>
+          <button className="bf-back-circle" onClick={goBack}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M7.99967 12.6666L3.33301 7.99998L7.99967 3.33331" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M12.6663 8H3.33301" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1648,7 +1676,7 @@ const confirmQuit = async () => {
           </div>
           <p className="bf-difference-desc">Through peer matching, your £{paymentTotal} donation helped raise funds for {paymentData?.charity_name ?? 'the charity'}.</p>
         </div>
-        <button className="bf-teal-btn bf-teal-btn--full" onClick={() => router.goBack()}>Back to lobby</button>
+        <button className="bf-teal-btn bf-teal-btn--full" onClick={goBack}>Back to lobby</button>
         <div style={{ height: 48 }} />
       </div>
     </IonContent></IonPage>
@@ -1748,50 +1776,48 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
   const youRankColor = (m: any): string | null => {
     const amt = amountOf(m);
     // Binary colour rule, compared only within the donor's own group:
-    //   red   = the lowest bid (all tied lowest bidders are red), and every zero bid
+    //   red   = the lowest bid (all tied lowest bidders are red)
     //   green = everyone else
+    //   none  = a donor who has not bid yet in this round
     // The middle 'amber' tier has been removed. minAmt is the lowest NON-ZERO bid,
     // because rankPool filters out zeros — matching the server's matched-amount rule.
     if (maxAmt < 0) return null;          // nobody has bid yet → no colour
-    if (amt <= 0) return '#F6494D';       // zero bid → red
+    if (amt <= 0) return null;            // this donor has not bid yet → no colour
     return amt === minAmt ? '#F6494D' : '#27A99F';
   };
 
-  // ★ NEW: tint the whole card to match the logged-in user's rank (light fills from Figma)
-  const youMember = members.find((m: any) => m?.is_you) ?? roundBids.find((b: any) => b.is_you) ?? null;
-  const youCardColor = youMember ? youRankColor(youMember) : null;
-  const cardTint =
-    youCardColor === '#27A99F' ? '#EAF6F6' :   // green
-    youCardColor === '#FCB13E' ? '#FFF8F0' :   // amber
-    youCardColor === '#F6494D' ? '#FFF2F2' :   // red
-    undefined;
+  // Group panel is always plain white. The rank colour now lives on the individual
+  // member cards (see renderAvatarCol) instead of tinting the whole panel with the
+  // logged-in donor's rank, which made the panel red/green for every viewer.
+  const cardTint = '#FFFFFF';
 
   // Use a swiper whenever there are more cards than fit comfortably in one view
   const needsSlider = slots.length > perView;
 
   const renderAvatarCol = (m: any, i: number) => {
     const isYou = m?.is_you ?? false;
-    const youColor = isYou ? youRankColor(m) : null;
+    // Colour is resolved PER MEMBER (lowest bid / zero bid = red, everyone else = green).
+    // Previously this was gated on isYou, so every card inherited the logged-in donor's
+    // rank colour. Empty pad slots stay uncoloured.
+    const youColor = m ? youRankColor(m) : null;
     const amt = amountOf(m);
     const name  = isYou ? 'You' : (m?.pseudonym ?? '?');
     const emoji = m?.emoji ?? null;
     const initial = m?.initial ?? '?';
     const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
-    // Mobile polish: equal-height cells; filled member cells read as white cards (Figma look)
-    const activeMember = myGroup?.members?.find((x: any) => x?.is_you);
-    const activeColor = (activeMember ? youRankColor(activeMember) : null) ?? '#F1F2F6';
-
+    // Mobile polish: equal-height cells. Each occupied cell is filled with that member's
+    // own rank colour; empty pad slots keep the neutral hairline border.
     const colStyle: React.CSSProperties = {
       height: '100%',
       justifyContent: 'flex-start',
-      ...(isYou
+      ...(youColor
         ? {
-            background: activeColor,
-            border: `1px solid ${activeColor}`,
+            background: youColor,
+            border: `1px solid ${youColor}`,
           }
         : {
             background: 'transparent',
-            border: `1px solid ${activeColor}`,
+            border: '1px solid #F1F2F6',
           }),
     };
     const nameStyle: React.CSSProperties = {

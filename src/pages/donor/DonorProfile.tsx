@@ -11,6 +11,7 @@ import { joinEvent, getDonorEventDetail } from '../../services/donorEvents';
 import { updateProfile, changePassword } from '../../services/profileService';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
 import { clearSession } from '../../services/auth'; // adjust relative path
+import { useLockedBack } from '../../components/EventLockGate';
 
 const RANDOM_NAMES = [
   'Brave Panda', 'Silent Fox', 'Cosmic Bear', 'Lucky Tiger',
@@ -22,6 +23,13 @@ const DonorProfile: React.FC = () => {
 
   const router   = useIonRouter();
   const location = useLocation();
+
+  // In-page back arrow. router.back() cannot be intercepted by EventLockGuard
+  // and is a silent no-op when the history stack is empty (fresh tab, deep
+  // link, hard refresh), which left this arrow dead. useLockedBack routes to
+  // the donor's locked event when locked, and behaves like a normal back
+  // otherwise.
+  const goBack = useLockedBack();
 
   const params = new URLSearchParams(location.search);
   const isJoin = params.get('mode') === 'join';
@@ -129,8 +137,25 @@ const handleEmailInfoClick = () => {
           try {
             const code = localStorage.getItem('event_code') ?? '';
             await joinEvent(eventId, code, displayName.trim());
-          } catch {
-            // already joined — continue
+          } catch (err: any) {
+            // 409 = this donor is already taking part in a different event.
+            // The API refused the join, so sending them to /bid for THIS event
+            // would drop them into an event they are not in. Take them to the
+            // event they are actually in instead.
+            const locked = err?.response?.status === 409
+              ? err?.response?.data?.active_event
+              : null;
+
+            if (locked?.event_id) {
+              setSaveError(
+                err?.response?.data?.message ??
+                'You are already taking part in another event.'
+              );
+              router.push(`/bid?id=${locked.event_id}`, 'root');
+              return;
+            }
+            // Any other failure (already joined, transient network) — continue
+            // exactly as before.
           }
         }
         router.push(`/bid?id=${eventId}`, 'root');
@@ -201,7 +226,7 @@ const handleEmailInfoClick = () => {
             title={!isJoin ? 'Donor Profile' : undefined}
             rightSlot={!isJoin ? <span className="logout">Sign Out</span> : undefined}
             onRightSlotClick={!isJoin ? handleSignOut : undefined}
-            onBack={() => router.back()}
+            onBack={goBack}
           />
 
           {/* Subtitle (JOIN ONLY) */}
