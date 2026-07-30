@@ -40,6 +40,7 @@ interface Donor {
   status?: 'bidding' | 'left' | 'no-bid' | null;
   color: string;
   groupMemberId?: number;
+  photoUrl?: string | null;
 }
 
 interface Group {
@@ -73,6 +74,7 @@ interface ApiHistoryDonor {
   bid_amount: string | null;
   matched_amount: string | null;   // this round's group min bid, credited only if this donor bid > 0
   is_quit: boolean;
+  photo_url?: string | null;
 }
 
 interface HistoryDonor {
@@ -81,6 +83,7 @@ interface HistoryDonor {
   bid: string | null;
   matched: string | null;
   isQuit: boolean;
+  photoUrl?: string | null;
 }
 
 const mapHistoryDonors = (donors?: ApiHistoryDonor[] | null): HistoryDonor[] =>
@@ -90,6 +93,7 @@ const mapHistoryDonors = (donors?: ApiHistoryDonor[] | null): HistoryDonor[] =>
     bid: d.is_quit ? null : d.bid_amount,
     matched: d.is_quit ? null : d.matched_amount,
     isQuit: d.is_quit,
+    photoUrl: d.photo_url ?? null,
   }));
 
 interface RoundData {
@@ -124,10 +128,18 @@ interface PgaGroup {
 /* ── Color palette for donor avatars ── */
 const COLORS = ['#E6F4F2', '#FFF3E6', '#EEF1F4', '#F2F2F2'];
 
+// ★ NEW: shows a donor's uploaded photo when available, falling back to the
+// existing initial-letter rendering untouched. Shared by every donor avatar
+// spot in this file so photo support is added in one place.
+const renderAvatarContent = (photoUrl: string | null | undefined, initial: string) =>
+  photoUrl
+    ? <img src={photoUrl} alt={initial} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+    : initial;
+
 // Host Summary sheet payload (see EventController::show → 'summary').
 interface SummaryGroup { name: string; min_bid: number | null; max_bid: number | null; group_total: number; donors?: ApiHistoryDonor[]; }
 interface SummaryRound { round_number: number; status: string; groups: SummaryGroup[]; }
-interface SummaryDonor { pseudonym: string; initial: string; owed: number; payment_status: 'paid' | 'unpaid'; paid_at: string | null; }
+interface SummaryDonor { pseudonym: string; initial: string; owed: number; payment_status: 'paid' | 'unpaid'; paid_at: string | null; photo_url?: string | null; }
 interface EventSummary { rounds: SummaryRound[]; donors: SummaryDonor[]; }
 
 // Fallback emoji pool when emoji is not stored on GroupMember
@@ -194,7 +206,7 @@ const ViewEvent: React.FC = () => {
   const eventId = new URLSearchParams(location.search).get('id');
 
   // ─── Donor message modal (host ↔ donor) ──────────────────────────────
-  const [msgDonor, setMsgDonor]     = useState<{ groupMemberId: number; name: string; initial: string; color: string } | null>(null);
+  const [msgDonor, setMsgDonor]     = useState<{ groupMemberId: number; name: string; initial: string; color: string; photoUrl?: string | null } | null>(null);
   const [msgThread, setMsgThread]   = useState<DonorMessage[]>([]);
   const [msgBody, setMsgBody]       = useState('');
   const [msgLoading, setMsgLoading] = useState(false);
@@ -228,7 +240,7 @@ const ViewEvent: React.FC = () => {
 
   const openMsgModal = async (d: Donor) => {
     if (!d.groupMemberId || !eventId) return;
-    setMsgDonor({ groupMemberId: d.groupMemberId, name: d.name, initial: d.initial, color: d.color });
+    setMsgDonor({ groupMemberId: d.groupMemberId, name: d.name, initial: d.initial, color: d.color, photoUrl: d.photoUrl });
     setMsgBody('');
     setMsgError(null);
     setMsgThread([]);
@@ -480,6 +492,7 @@ const handleEndEvent = async () => {
             : (apiEvent?.status === 'finished' ? 'no-bid' : 'bidding'),
         color: COLORS[(gi + di) % COLORS.length],
         groupMemberId: d.group_member_id,
+        photoUrl: (d as unknown as { photo_url?: string | null }).photo_url ?? null,
       })),
     }));
 
@@ -1556,7 +1569,7 @@ const handleCopy = async (text: string, field: string) => {
                     {g.donors.map((donor, di) => (
                       <div key={di} className="ve-all-donor-row">
                         <div className="ve-all-donor-top">
-                          <div className="ve-donor-avatar" style={{ background: donor.color }}>{donor.initial}</div>
+                          <div className="ve-donor-avatar" style={{ background: donor.color }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
                           <div className="ve-donor-info">
                             <span className="ve-donor-name">{donor.name}</span>
                             <span className="ve-donor-sub">{donor.sub}</span>
@@ -1603,7 +1616,7 @@ const handleCopy = async (text: string, field: string) => {
             <div className="ve-sheet ve-msg-sheet">
               <div className="ve-sheet-handle" />
               <div className="ve-msg-head">
-                <div className="ve-donor-avatar" style={{ background: msgDonor.color }}>{msgDonor.initial}</div>
+                <div className="ve-donor-avatar" style={{ background: msgDonor.color }}>{renderAvatarContent(msgDonor.photoUrl, msgDonor.initial)}</div>
                 <div className="ve-msg-head-info">
                   <span className="ve-msg-head-name">{msgDonor.name}</span>
                   <span className="ve-msg-head-sub">Delivered when the donor is next active</span>
@@ -1796,7 +1809,7 @@ const handleCopy = async (text: string, field: string) => {
                 <div className="ve-donor-group-label">Payments</div>
                 {summaryData && summaryData.donors.length > 0 ? summaryData.donors.map((d, di) => (
                   <div key={di} className="ve-all-donor-row">
-                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length] }}>{d.initial}</div>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length] }}>{renderAvatarContent(d.photo_url, d.initial)}</div>
                     <div className="ve-donor-info">
                       <span className="ve-donor-name">{d.pseudonym}</span>
                       <span className="ve-donor-sub">{d.owed > 0 ? `Owes £${d.owed}` : 'No payment due'}</span>
@@ -1838,7 +1851,7 @@ const handleCopy = async (text: string, field: string) => {
               <div className="ve-donor-list">
                 {selectedGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row" style={getDonorRankStyle(donor, selectedGroup.donors)}>
-                    <div className="ve-donor-avatar" style={{ background: donor.color }}>{donor.initial}</div>
+                    <div className="ve-donor-avatar" style={{ background: donor.color }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span><span className="ve-donor-sub">{donor.sub}</span></div>
                     <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
                     <span className="ve-donor-remove">⊗</span>
@@ -1869,7 +1882,7 @@ const handleCopy = async (text: string, field: string) => {
                 )}
                 {selectedHistoryGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row" style={getHistoryDonorRankStyle(donor, selectedHistoryGroup.donors)}>
-                    <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>{donor.initial}</div>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span></div>
                     <div className="ve-donor-right">
                       {donor.isQuit

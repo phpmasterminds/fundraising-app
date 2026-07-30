@@ -1268,7 +1268,7 @@ const confirmQuit = async () => {
             </div>
           ) : (
             <button className="bf-orange-btn" onClick={() => { setSubmitError(''); setConfirmBidOpen(true); }} disabled={submitting} style={submitting?{opacity:0.6}:{}}>
-              <BoltIcon /> {submitting ? 'Placing...' : `Place Final Bid – £${fmtAmount(bidAmount)}`}
+              <BoltIcon /> {submitting ? 'Placing...' : `Place Bid – £${fmtAmount(bidAmount)}`}
             </button>
           )}
         </div>
@@ -1805,6 +1805,14 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
     const emoji = m?.emoji ?? null;
     const initial = m?.initial ?? '?';
     const status = m?.bid_status === 'submitted' ? 'Submitted' : 'Bidding';
+    // ★ NEW: profile photo support — if the member record carries a photo path/URL
+    // (checking the common field names a backend might use), show it; otherwise
+    // fall back to the existing emoji/initial rendering untouched below.
+    const rawPhoto: string | null =
+      m?.photo_url ?? m?.profile_photo_url ?? m?.avatar_url ?? m?.profile_photo ?? m?.photo ?? m?.avatar ?? null;
+    const photoSrc: string | null = rawPhoto
+      ? (rawPhoto.startsWith('http') ? rawPhoto : `${(import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '')}/storage/${rawPhoto}`)
+      : null;
     // Mobile polish: equal-height cells. Each occupied cell is filled with that member's
     // own rank colour; empty pad slots keep the neutral hairline border.
     const colStyle: React.CSSProperties = {
@@ -1831,8 +1839,10 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
     return (
       <div key={i} className={`bf-avatar-col ${isYou ? 'bf-avatar-box--you' : ''}`} style={colStyle}>
         <div className="bf-avatar-box" style={youColor ? { background: '#fff', borderRadius: '50%' } : undefined}>
-          {emoji ? <span className="bf-avatar-em">{emoji}</span>
-            : <span className="bf-avatar-em" style={{ fontSize:18, fontWeight:600 }}>{m ? initial : '—'}</span>}
+          {photoSrc
+            ? <img src={photoSrc} alt={name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+            : (emoji ? <span className="bf-avatar-em">{emoji}</span>
+              : <span className="bf-avatar-em" style={{ fontSize:18, fontWeight:600 }}>{m ? initial : '—'}</span>)}
         </div>
         <span className={`bf-avatar-name ${isYou ? 'bf-avatar-name--you' : ''}`} style={nameStyle}>{m ? name : '...'}</span>
         <span className="bf-avatar-status" style={youColor ? { color: 'rgba(255,255,255,0.85)' } : undefined}>{m ? status : ''}</span>
