@@ -198,6 +198,8 @@ export interface RoundStatus {
   seconds_left:       number | null;
   seconds_until_next: number | null;
   payment_status?:    'paid' | 'unpaid'; // present when donor has paid
+  /** true while the host has paused the PGA waiting timer to review/adjust groups */
+  paused?:            boolean;
 }
 
 export async function getRoundStatus(eventId: number): Promise<RoundStatus> {

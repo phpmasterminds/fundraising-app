@@ -53,9 +53,15 @@ export interface Event {
   active_alert?:         string | null;
   // Live data
   current_groups?:       ApiGroup[];
+  // Next round's OWN groups — reflects a PGA group-size change instantly.
+  // current_groups shows the last CLOSED round while a round is 'waiting'.
+  next_round_groups?:    ApiGroup[];
   rounds_overview?:      ApiRound[];
   all_donors?:           ApiDonor[];
   qr_code?: string | null;
+  // PGA waiting-period countdown (remaining seconds) and pause state
+  waiting_seconds_left?: number;
+  pga_paused?:           boolean;
 }
 
 export interface ApiDonor {
@@ -232,6 +238,29 @@ export async function updateGroupSize(
   const { data } = await api.patch(`/host/events/${eventId}/group-size`, {
     group_size: groupSize,
   });
+  return data;
+}
+
+/**
+ * POST /host/events/:id/rounds/pause-timer
+ *
+ * Pauses the donor-facing waiting countdown while the host reviews/adjusts
+ * groups in the Proposed Group Allocations sheet. Idempotent.
+ */
+export async function pauseTimer(eventId: number): Promise<{ paused: boolean }> {
+  const { data } = await api.post(`/host/events/${eventId}/rounds/pause-timer`);
+  return data;
+}
+
+/**
+ * POST /host/events/:id/rounds/resume-timer
+ *
+ * Reverses pauseTimer. The donor's remaining wait time is preserved — the
+ * backend shifts the countdown forward by however long it was paused, rather
+ * than losing that time. Safe to call when not currently paused (no-op).
+ */
+export async function resumeTimer(eventId: number): Promise<{ paused: boolean }> {
+  const { data } = await api.post(`/host/events/${eventId}/rounds/resume-timer`);
   return data;
 }
 

@@ -122,6 +122,7 @@ const BidFlow: React.FC = () => {
   // Server-seeded timers
   const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
   const [waitingSecsLeft,    setWaitingSecsLeft]    = useState<number | null>(null);
+  const [hostPaused,         setHostPaused]         = useState(false); // host paused the PGA waiting timer
   const [roundCloseSecsLeft, setRoundCloseSecsLeft] = useState<number | null>(null); // countdown on round-results
   const [roundEnding,        setRoundEnding]        = useState(false); // timer hit 0, waiting for backend to confirm closed
 
@@ -138,7 +139,6 @@ const BidFlow: React.FC = () => {
   const roundTimerRef = useRef<any>(null);
   const waitTimerRef  = useRef<any>(null);
   const pollRef       = useRef<any>(null);
-  const groupPollRef  = useRef<any>(null); // confirm-bid group/zero-bid refresh runs on its own interval so it never clobbers Effect 3b's status+timer poll (pollRef)
   const resultsFetchedRef = useRef<boolean>(false); // true once we've fetched final grouped results
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const rafRef        = useRef<number>(0);
@@ -159,6 +159,7 @@ const BidFlow: React.FC = () => {
     setGroupBidsOpen(false);
     setRoundSecsLeft(null);
     setWaitingSecsLeft(null);
+    setHostPaused(false);
     setRoundCloseSecsLeft(null);
     setRoundEnding(false);
     setPaymentData(null);
@@ -205,6 +206,7 @@ const BidFlow: React.FC = () => {
         // screen and moves them onto the bid screen the moment the next round opens.
         setCurrentRound(res.current_round);
         setWaitingSecsLeft(res.seconds_until_next);
+        setHostPaused(!!(res as any).paused);
         setScreen('waiting');
       } else if (res.current_round > 0) {
         setCurrentRound(res.current_round);
@@ -308,6 +310,14 @@ const BidFlow: React.FC = () => {
           if (d.ignore_zero_bids !== undefined) setIgnoreZeroBids(d.ignore_zero_bids !== false);
         }).catch(() => {});
 
+        // Merged from the former Effect 8a: refresh the group/bids snapshot every tick
+        // while the donor is on confirm-bid, instead of running a second 5s interval in
+        // parallel with this one (that second interval was independently hitting /group
+        // and /events/{id} on its own clock, doubling those requests every ~5s).
+        if (screen === 'confirm-bid') {
+          getCurrentRound(eventId).then(d => setRoundData(d)).catch(() => {});
+        }
+
         // Host finished the whole event
         if (res.payment_status === 'paid') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
@@ -368,7 +378,13 @@ const BidFlow: React.FC = () => {
           // live bids and group assignment update while the donor stays on the bid screen
           // (they no longer navigate away after placing). Only roundData is refreshed here —
           // the timer is synced above and the bid input (bidAmount/inputVal) is untouched.
-          getCurrentRound(eventId).then(d => setRoundData(d)).catch(() => {});
+          // Skipped on confirm-bid: the merged block above (former Effect 8a) already
+          // refreshes roundData unconditionally on confirm-bid every tick, so firing it
+          // again here would call /group twice in the same tick. Still runs on bid-entry,
+          // which the merged block does not cover.
+          if (screen !== 'confirm-bid') {
+            getCurrentRound(eventId).then(d => setRoundData(d)).catch(() => {});
+          }
         }
 
         // Host enabled the waiting period between rounds
@@ -377,6 +393,7 @@ const BidFlow: React.FC = () => {
           setRoundSecsLeft(0); // stop the round timer
           setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(res.seconds_until_next);
+          setHostPaused(!!(res as any).paused);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -465,6 +482,7 @@ const BidFlow: React.FC = () => {
         if (res.round_status === 'waiting') {
           clearInterval(pollRef.current); setRoundEnding(false);
           setWaitingSecsLeft(res.seconds_until_next);
+          setHostPaused(!!(res as any).paused);
           setGroupBidsOpen(false);
           setScreen('round-results'); return;
         }
@@ -558,6 +576,7 @@ const BidFlow: React.FC = () => {
           }
           setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(null);
+          setHostPaused(false);
           setRoundEnding(false);
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('confirm-bid');
@@ -592,6 +611,7 @@ const BidFlow: React.FC = () => {
           if (res.seconds_until_next !== null && res.seconds_until_next !== undefined) {
             setWaitingSecsLeft(res.seconds_until_next);
           }
+          setHostPaused(!!(res as any).paused);
           // Fetch grouped results exactly once — roundData at this point still has
           // open-round data (group_total: null, all bids unscoped). One getCurrentRound
           // call after close gives us the final matched_amount, group_total, round_bids.
@@ -617,6 +637,7 @@ const BidFlow: React.FC = () => {
           clearInterval(pollRef.current);
           setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(null);
+          setHostPaused(false);
           setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
@@ -649,6 +670,7 @@ const BidFlow: React.FC = () => {
   // 7. waiting: tick countdown (seeded from server seconds_until_next) — runs on round-results screen now
   useEffect(() => {
     if (screen !== 'waiting' && screen !== 'round-results') return;
+    if (hostPaused) return; // frozen server-side — don't let the local tick race ahead
     if (!waitingSecsLeft || waitingSecsLeft <= 0) return;
     clearInterval(waitTimerRef.current);
     waitTimerRef.current = setInterval(() => {
@@ -658,7 +680,7 @@ const BidFlow: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(waitTimerRef.current);
-  }, [screen, !!waitingSecsLeft && waitingSecsLeft > 0]);
+  }, [screen, !!waitingSecsLeft && waitingSecsLeft > 0, hostPaused]);
 
   // 7b. round-results: when waitingSecsLeft hits 0 OR is null on last round,
   //     resume polling every 3s for next round opening or event finishing
@@ -695,6 +717,7 @@ const BidFlow: React.FC = () => {
           }
           setRoundCloseSecsLeft(null);
           setWaitingSecsLeft(null);
+          setHostPaused(false);
           setRoundEnding(false);
           setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
           setScreen('confirm-bid');
@@ -719,27 +742,6 @@ const BidFlow: React.FC = () => {
     }, 3000);
     return () => clearInterval(pollRef.current);
   }, [screen, waitingSecsLeft, eventId, currentRound, totalRounds, lastBidAmount]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 8a. confirm-bid: poll every 5s to refresh group member bid statuses
-  useEffect(() => {
-    if (screen !== 'confirm-bid') return;
-    clearInterval(groupPollRef.current);
-    groupPollRef.current = setInterval(async () => {
-      try {
-        const d = await getCurrentRound(eventId);
-        setRoundData(d);
-        // Reconcile ignore_zero_bids on this screen too. This runs on its OWN interval
-        // (groupPollRef) so it no longer clobbers Effect 3b's status+timer poll (pollRef).
-        // Effect 3b now keeps running on confirm-bid: it syncs the round timer from the
-        // server every tick and detects round-close / event-finished, so the donor can't
-        // sit on a phantom countdown or try to bid after the round has already ended.
-        getDonorEventDetail(eventId).then(ev => {
-          if (ev.ignore_zero_bids !== undefined) setIgnoreZeroBids(ev.ignore_zero_bids !== false);
-        }).catch(() => {});
-      } catch (_) {}
-    }, 5000);
-    return () => clearInterval(groupPollRef.current);
-  }, [screen, eventId]);
 
   // 8. waiting: poll every 5s for next round opening
   useEffect(() => {
@@ -819,30 +821,11 @@ const BidFlow: React.FC = () => {
 
   /* ══════ HANDLERS ══════ */
 
-  // Floor for the CURRENT round's bid: the donor's own final bid from the
-  // PREVIOUS round (round 1 has no previous round, so no floor there).
-  // Derived fresh each render from the round history the backend returns —
-  // this is what actually implements "round N's minimum is my round N-1 bid,"
-  // distinct from lastBidAmount below (a refresh-safe pre-fill convenience,
-  // not a rule). Within the current round the donor can move freely above
-  // (or, once submitted, back down to) this floor as many times as they like
-  // until the round closes.
-  const roundFloor = (() => {
-    const prevRoundBid = (roundData as any)?.all_round_bids?.find(
-      (r: any) => r.round_number === currentRound - 1
-    );
-    return prevRoundBid ? Number(prevRoundBid.amount) || 0 : 0;
-  })();
-
   const handlePlaceBid = async () => {
     if (submitting) return;
     if (roundSecsLeft !== null && roundSecsLeft <= 0) { setSubmitError('Round has ended. Bidding is closed.'); return; }
     setSubmitError('');
     if (ignoreZeroBids && (!bidAmount || bidAmount <= 0)) { setSubmitError('Please enter a bid amount.'); return; }
-    if (roundFloor > 0 && bidAmount < roundFloor) {
-      setSubmitError(`Bid must be at least £${roundFloor} (your Round ${currentRound - 1} bid).`);
-      return;
-    }
     setSubmitting(true);
     try {
       await submitBid(eventId, bidAmount);
@@ -896,7 +879,7 @@ const confirmQuit = async () => {
   };
 
   const adjustBid = (delta: number) => {
-    setBidAmount(prev => { const n = Math.max(roundFloor, prev + delta); setInputVal(String(n)); return n; });
+    setBidAmount(prev => { const n = Math.max(0, prev + delta); setInputVal(String(n)); return n; });
   };
 
   /* ── Derived ─────────────────────────────────────────────────────── */
@@ -948,6 +931,12 @@ const confirmQuit = async () => {
   const myGroup    = roundData?.my_group  ?? null;
   const groupSize  = roundData?.group_size ?? 4;
   const matchRatio = roundData?.match_ratio ?? '1:3';
+  // Whether the backend has actually told us the group size yet. Before roundData
+  // arrives, groupSize falls back to the "?? 4" default above purely so other
+  // calculations don't break — it does NOT mean 4 is the real group size. GroupCard
+  // uses this flag to show a loading spinner instead of prematurely rendering 4
+  // placeholder slots that then "shrink" once the real size loads.
+  const groupSizeKnown = roundData?.group_size !== undefined && roundData?.group_size !== null;
 
   // Actual number of members in this donor's group
   const actualInGroup = (myGroup?.members?.length ?? 0) > 0
@@ -1057,7 +1046,7 @@ const confirmQuit = async () => {
       >
         <h3 style={{ margin:'0 0 8px', fontSize:20, fontWeight:600, color:'#1A1A2E' }}>Place bid of £{fmtAmount(bidAmount)}?</h3>
         <p style={{ margin:'0 0 24px', fontSize:14, lineHeight:1.5, color:'#6B7280' }}>
-          Are you sure you want to place this bid? You can't change it once it's placed for this round.
+          Are you sure you want to place this bid?
         </p>
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', margin:'0 0 16px' }}>{submitError}</p>}
         <div style={{ display:'flex', gap:12 }}>
@@ -1168,7 +1157,7 @@ const confirmQuit = async () => {
       <div className="bf-s2">
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
         <div className="bf-amount-zone">
-          <p className="bf-amount-hint">Type your bid{roundFloor > 0 ? ` (min £${roundFloor})` : ''}</p>
+          <p className="bf-amount-hint">Type your bid</p>
           <div className="bf-amount-display">
             <span className="bf-pound">£</span>
 				<input className="bf-amount-input" type="text" value={bidDisplay}
@@ -1177,11 +1166,11 @@ const confirmQuit = async () => {
 				if (raw !== '' && !/^\d+$/.test(raw)) return;
 				setInputVal(raw);
 				const n = parseInt(raw, 10);
-				if (!isNaN(n)) setBidAmount(Math.max(roundFloor, n));
+				if (!isNaN(n)) setBidAmount(Math.max(0, n));
 			  }}
 			  onBlur={() => {
 				const n = parseInt(inputVal.replace(/,/g, ''), 10);
-				if (isNaN(n) || n < roundFloor) { setBidAmount(roundFloor); setInputVal(String(roundFloor)); }
+				if (isNaN(n) || n < 0) { setBidAmount(0); setInputVal('0'); }
 			  }}
 			  inputMode="numeric" style={{ flexShrink:0, fontSize: bidEntryScale < 1 ? `${bidEntryScale}em` : undefined, width: `${bidLen}ch` }} />
           </div>
@@ -1220,7 +1209,7 @@ const confirmQuit = async () => {
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
-        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} myBid={myBid} />
+        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} myBid={myBid} groupSizeKnown={groupSizeKnown} />
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
@@ -1236,11 +1225,11 @@ const confirmQuit = async () => {
                 if (raw !== '' && !/^\d+$/.test(raw)) return; // digits only — block any characters
                 setInputVal(raw);
                 const n = parseInt(raw, 10);
-                if (!isNaN(n)) setBidAmount(Math.max(roundFloor, n));
+                if (!isNaN(n)) setBidAmount(Math.max(0, n));
               }}
               onBlur={() => {
                 const n = parseInt(inputVal.replace(/,/g, ''), 10);
-                if (isNaN(n) || n < roundFloor) { setBidAmount(roundFloor); setInputVal(String(roundFloor)); }
+                if (isNaN(n) || n < 0) { setBidAmount(0); setInputVal('0'); }
               }}
               inputMode="numeric"
               aria-label="Your bid amount"
@@ -1436,7 +1425,14 @@ const confirmQuit = async () => {
             color: '#9AA0A6', fontSize: 14, fontWeight: 500,
           }}>
             <span>Round {currentRound + 1}</span>
-            {(roundCloseSecsLeft !== null && roundCloseSecsLeft > 0) || (waitingSecsLeft !== null && waitingSecsLeft > 0) ? (
+            {hostPaused ? (
+              <span style={{ display:'flex', alignItems:'center', gap:5, fontStyle: 'italic' }}>
+                Host has paused
+                {waitingSecsLeft !== null && waitingSecsLeft > 0 && (
+                  <span style={{ fontStyle: 'normal' }}>({fmt(waitingSecsLeft)})</span>
+                )}
+              </span>
+            ) : (roundCloseSecsLeft !== null && roundCloseSecsLeft > 0) || (waitingSecsLeft !== null && waitingSecsLeft > 0) ? (
               <span style={{ display:'flex', alignItems:'center', gap:5 }}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                   <path d="M6.66699 1.33337H9.33366" stroke="#9AA0A6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1470,12 +1466,17 @@ const confirmQuit = async () => {
         <div style={{ textAlign:'center' }}>
           <h2 style={{ fontSize:22, fontWeight:600, color:'#1A1A2E', margin:'0 0 8px' }}>Round {currentRound} Complete!</h2>
           <p style={{ fontSize:14, color:'#9AA0A6', margin:'0 0 16px' }}>
-            {waitingSecsLeft !== null && waitingSecsLeft > 0
+            {hostPaused
+              ? 'Host has paused — groups are being finalized'
+              : waitingSecsLeft !== null && waitingSecsLeft > 0
               ? `Round ${currentRound + 1} starts in`
               : `Waiting for host to open Round ${currentRound + 1}...`}
           </p>
           {waitingSecsLeft !== null && waitingSecsLeft > 0 && (
-            <p style={{ fontSize:64, fontWeight:500, color:'#1A1A2E', margin:0, letterSpacing:-3, fontFamily:'monospace' }}>
+            <p style={{
+              fontSize:64, fontWeight:500, margin:0, letterSpacing:-3, fontFamily:'monospace',
+              color: hostPaused ? '#C5C8CC' : '#1A1A2E',
+            }}>
               {fmt(waitingSecsLeft)}
             </p>
           )}
@@ -1498,7 +1499,9 @@ const confirmQuit = async () => {
                 <path d="M8 9.33337L10 7.33337" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M8.00033 14.6667C10.9458 14.6667 13.3337 12.2789 13.3337 9.33333C13.3337 6.38781 10.9458 4 8.00033 4C5.05481 4 2.66699 6.38781 2.66699 9.33333C2.66699 12.2789 5.05481 14.6667 8.00033 14.6667Z" stroke="#25201D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              {waitingSecsLeft !== null && waitingSecsLeft > 0 ? fmt(waitingSecsLeft) : '—'}
+              {hostPaused
+                ? (waitingSecsLeft !== null && waitingSecsLeft > 0 ? `Paused (${fmt(waitingSecsLeft)})` : 'Paused')
+                : waitingSecsLeft !== null && waitingSecsLeft > 0 ? fmt(waitingSecsLeft) : '—'}
             </span>
           </div>
         </div>
@@ -1714,7 +1717,7 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
 
 const AVATAR_PAGE = 4;
 
-const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number }> = ({ myGroup, groupSize, roundBids = [], myBid = 0 }) => {
+const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number; groupSizeKnown?: boolean }> = ({ myGroup, groupSize, roundBids = [], myBid = 0, groupSizeKnown = true }) => {
   // Prefer myGroup.members (scoped to THIS donor's group) once a group has been assigned.
   // round_bids is UNSCOPED — it holds every donor's bid across every group in the round, so
   // using it after grouping shows other groups' donors inside this group's card (e.g. Group A's
@@ -1871,7 +1874,14 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
       </div>
       {myGroup && <p className="bf-gc-sub">You're matched with {Math.max(0, members.length - 1)} other donors</p>}
       {!myGroup && <p className="bf-gc-sub">Waiting for group assignment...</p>}
-      {needsSlider ? (
+      {!myGroup && !groupSizeKnown ? (
+        // Real group size hasn't arrived from the backend yet — show a spinner rather
+        // than the "?? 4" fallback slot count, which would render 4 placeholder cards
+        // that then visibly shrink to the real count once roundData loads.
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 96, width: '100%' }}>
+          <div className="bf-loading-spin" style={{ width: 28, height: 28 }} />
+        </div>
+      ) : needsSlider ? (
         <Swiper
           modules={[Pagination]}
           pagination={{ clickable: true }}

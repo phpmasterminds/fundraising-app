@@ -24,6 +24,8 @@ import {
   sendDonorMessage,
   getDonorMessages,
   getUnreadDonorMessageIds,
+  pauseTimer,
+  resumeTimer,
 } from '../../services/events';
 import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage } from '../../services/events';
 import { copyOutline, checkmarkOutline } from 'ionicons/icons';
@@ -114,6 +116,7 @@ interface PgaMember {
   initial: string;
   amount: string;
   emoji: string;
+  photoUrl?: string | null;
   selected: boolean;
   isYou: boolean;         // true only for the logged-in user's own cell
 }
@@ -123,6 +126,12 @@ interface PgaGroup {
   label: string; // "Group A"
   members: PgaMember[];
   expanded: boolean;
+  // This round's real resolved capacity (GroupingService::resolveRoundCapacity,
+  // headcount-aware, recomputed fresh every round) — comes through on the API
+  // as this group's total_bids. Captured here so the move-sheet's "Full" check
+  // below uses THIS round's actual capacity instead of a stale event-level
+  // value that only ever reflected the round 1 -> round 2 boundary.
+  capacity: number;
 }
 
 /* ── Color palette for donor avatars ── */
@@ -131,10 +140,21 @@ const COLORS = ['#E6F4F2', '#FFF3E6', '#EEF1F4', '#F2F2F2'];
 // ★ NEW: shows a donor's uploaded photo when available, falling back to the
 // existing initial-letter rendering untouched. Shared by every donor avatar
 // spot in this file so photo support is added in one place.
-const renderAvatarContent = (photoUrl: string | null | undefined, initial: string) =>
-  photoUrl
-    ? <img src={photoUrl} alt={initial} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-    : initial;
+// A component (not a plain function) so it can track whether the photo URL
+// actually loaded — if it 404s / is unreachable, onError flips back to the
+// initial instead of leaving the browser's broken-image icon on screen.
+const AvatarContent: React.FC<{ photoUrl: string | null | undefined; initial: string }> = ({ photoUrl, initial }) => {
+  const [broken, setBroken] = useState(false);
+  if (!photoUrl || broken) return <>{initial}</>;
+  return (
+    <img
+      src={photoUrl}
+      alt={initial}
+      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+      onError={() => setBroken(true)}
+    />
+  );
+};
 
 // Host Summary sheet payload (see EventController::show → 'summary').
 interface SummaryGroup { name: string; min_bid: number | null; max_bid: number | null; group_total: number; donors?: ApiHistoryDonor[]; }
@@ -200,8 +220,30 @@ const ViewEvent: React.FC = () => {
     selectedMemberIds: number[];
   }>({ open: false, fromGroupId: null, selectedMemberIds: [] });
   const [pgaDeleteLoading, setPgaDeleteLoading] = useState(false);
+  // Host-controlled pause of the donor-facing waiting countdown while PGA is
+  // open. Seeded from apiEvent.pga_paused on each refresh so re-opening PGA
+  // (or another host session) reflects the real backend state, not just
+  // whatever this component last set locally.
+  const [pgaPaused, setPgaPaused]       = useState(false);
+  const [pgaPauseLoading, setPgaPauseLoading] = useState(false);
   const [pgaCreateLoading, setPgaCreateLoading] = useState(false);
   const moveSheetRef                    = useRef<HTMLDivElement>(null);
+
+  // ─── PGA drag-and-drop (single member, quick move) ────────────────────────
+  // Supplements the existing select + Actions-sheet flow — this is for a fast
+  // one-member drag between groups, not bulk moves.
+  const [pgaDrag, setPgaDrag] = useState<{
+    fromGroupId: number;
+    memberId: string;
+    name: string;
+    emoji: string;
+    photoUrl?: string | null;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [pgaDragOverGroupId, setPgaDragOverGroupId] = useState<number | null>(null);
+  const [pgaDragLoading, setPgaDragLoading] = useState(false);
+  const pgaDragMovedRef = useRef(false);
 
   const eventId = new URLSearchParams(location.search).get('id');
 
@@ -310,8 +352,9 @@ const ViewEvent: React.FC = () => {
     // waiting_seconds_left = PGA waiting period remaining after round closes
     const biddingSecsLeft = (data as any).seconds_left ?? 0;
     const waitingSecsLeft = (data as any).waiting_seconds_left ?? 0;
+    const isPaused        = !!(data as any).pga_paused;
 
-    console.log('[seedCountdown]', { biddingSecsLeft, waitingSecsLeft, timer });
+    console.log('[seedCountdown]', { biddingSecsLeft, waitingSecsLeft, timer, isPaused });
 
     // Clear both running intervals before reseeding
     if (timerRef.current)   { clearInterval(timerRef.current);   timerRef.current   = null; }
@@ -328,9 +371,16 @@ const ViewEvent: React.FC = () => {
       // Round closed — show waiting countdown on PGA button
       setTimerSecs(0);
       setWaitingSecs(waitingSecsLeft);
-      waitingRef.current = setInterval(() => {
-        setWaitingSecs(w => Math.max(0, w - 1));
-      }, 1000);
+      // Paused: freeze the display at the backend's frozen value. Do NOT start
+      // the local tick — without this guard the number still ticked down every
+      // second between 5s polls (only snapping back at each poll), which read
+      // as "the timer is still running" even though the backend itself was
+      // correctly holding the wait period.
+      if (!isPaused) {
+        waitingRef.current = setInterval(() => {
+          setWaitingSecs(w => Math.max(0, w - 1));
+        }, 1000);
+      }
     } else {
       setTimerSecs(0);
       setWaitingSecs(0);
@@ -465,7 +515,11 @@ const handleEndEvent = async () => {
       await updateGroupSize(Number(eventId), size);
       const fresh = await getEvent(Number(eventId));
       setApiEvent(fresh);
-      if (fresh.current_groups?.length) setPgaGroups(buildPgaGroups(fresh.current_groups));
+      const freshGroupSource =
+        (fresh as any).next_round_groups?.length ? (fresh as any).next_round_groups :
+        fresh.current_groups?.length             ? fresh.current_groups :
+        [];
+      if (freshGroupSource.length) setPgaGroups(buildPgaGroups(freshGroupSource));
     } catch (e: any) {
       setGroupSizeError(e?.response?.data?.message ?? e?.message ?? 'Could not update group size.');
     } finally { setGroupSizeSaving(false); }
@@ -542,10 +596,30 @@ const handleEndEvent = async () => {
   // has not been written yet (e.g. an event mid-flight when the feature shipped).
   const groupSizeRoundNum = hasOpenRound ? currentRoundNum : currentRoundNum + 1;
   const effectiveGroupSize = (() => {
+    // Prefer the round's REAL resolved capacity, already sent by the backend as
+    // each group's total_bids (GroupingService::resolveRoundCapacity — headcount-
+    // aware, recomputed fresh every round). This is the only thing that's correct
+    // from round 3 onward; group_size_after_r1 is only ever written once, at the
+    // round 1 -> round 2 boundary, so it goes stale for every later round.
+    const liveMax = groups.length ? Math.max(...groups.map(g => g.totalBids || 0)) : 0;
+    if (liveMax > 0) return liveMax;
+
+    // Fallback for the brief window before any groups exist yet (event not
+    // started, or round 1 hasn't opened) — nothing live to read from.
     const base = Number(apiEvent?.group_size ?? 0);
     if (groupSizeRoundNum < 2) return base;
     const after = (apiEvent as any)?.group_size_after_r1;
     return (after !== null && after !== undefined && Number(after) > 0) ? Number(after) : base * 2;
+  })();
+
+  // Same idea, scoped to the Proposed Group Allocations sheet specifically:
+  // pgaGroups reflects the NEXT round (via next_round_groups), which is often a
+  // different round than whatever `groups` (current_groups) is showing — e.g.
+  // PGA previews round 3 while the main grid still shows round 2. Falls back to
+  // effectiveGroupSize only if the PGA sheet has no groups loaded yet.
+  const pgaEffectiveGroupSize = (() => {
+    const liveMax = pgaGroups.length ? Math.max(...pgaGroups.map(g => g.capacity || 0)) : 0;
+    return liveMax > 0 ? liveMax : effectiveGroupSize;
   })();
 
   const scaleLabels = targetAmount > 0
@@ -581,12 +655,36 @@ const handleEndEvent = async () => {
     !hasOpenRound && hasClosedRound && !allRoundsDone
   ) && apiEvent?.status === 'live' && !pgaLaunched;
 
+  // ─── Detect when the waiting countdown hits 0 while still between rounds ──
+  // Mirrors the timerSecs effect above: switches polling to 2s aggressive mode
+  // until the backend's cron actually opens the next round, so the sheet
+  // closes promptly instead of sitting stale until the next 5s poll.
+  useEffect(() => {
+    if (waitingSecs === 0 && !hasOpenRound && hasClosedRound && !allRoundsDone && apiEvent?.status === 'live') {
+      setRoundEnding(true);
+    }
+  }, [waitingSecs, hasOpenRound, hasClosedRound, allRoundsDone, apiEvent?.status]);
+
+  // ─── Auto-close the PGA sheet once the next round has actually opened ────
+  // If the host is still reviewing "Proposed Group Allocations" when the
+  // waiting timer runs out and the backend opens the next round on its own,
+  // the sheet is stale — close it and tell the host what happened rather
+  // than leaving them looking at a round that's already live.
+  useEffect(() => {
+    if (showPGA && hasOpenRound) {
+      setShowPGA(false);
+      setPgaToast('Round started');
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  }, [showPGA, hasOpenRound]);
+
   // ─── Build PgaGroup[] from API current_groups ────────────────────────────
   const buildPgaGroups = (apiGroups: ApiGroup[]): PgaGroup[] =>
     apiGroups.map((g, gi) => ({
       id:       g.id ?? gi,
       label:    g.name,
       expanded: gi === 0,
+      capacity: g.total_bids ?? 0,
       members:  g.donors.map((d, di) => ({
         id:            `${g.id ?? gi}_${di}`,
         groupMemberId: d.group_member_id ?? (() => { console.warn('group_member_id missing for', d.pseudonym, '— check EventController::show()'); return 0; })(),
@@ -594,6 +692,7 @@ const handleEndEvent = async () => {
         initial:       d.initial,
         amount:        d.bid_amount ?? '—',
         emoji:         d.emoji ?? EMOJI_POOL[(gi * 10 + di) % EMOJI_POOL.length],
+        photoUrl:      (d as unknown as { photo_url?: string | null }).photo_url ?? null,
         selected:      false,
         isYou:         !!(d as any).is_you,
       })),
@@ -604,24 +703,73 @@ const handleEndEvent = async () => {
     if (!eventId) return;
     const freshData = await getEvent(Number(eventId));
     setApiEvent(freshData);
+    // Re-seed the custom-size input from THIS fetch, not the page-mount fetch.
+    // Without this, editGroupSize is only ever set once (see the `[location.search]`
+    // effect above) and goes stale across round transitions — e.g. it keeps
+    // showing Round 2's recommended size (4) after Round 2 closes and Round 3's
+    // PGA opens with a new recommended size (8), until a full page reload
+    // re-runs that mount effect. The "Recommended" badge/options list don't have
+    // this problem since groupSizeOptions is computed fresh from apiEvent on
+    // every render — only this plain input field was missing the re-sync.
+    setEditGroupSize(String((freshData as any).group_size_after_r1 ?? ((freshData.group_size ?? 0) * 2)));
     const lastRound = (freshData.rounds_overview ?? []).find((r: ApiRound) => r.status === 'closed');
     setPgaRoundId(lastRound?.id ?? null);
+    setPgaPaused(!!(freshData as any).pga_paused);
 
-    // current_groups holds the last-closed-round's groups (populated by GroupingService).
-    // If empty, fall back to last_round_groups (future backend field).
-    // Log to help diagnose if neither is populated.
+    // next_round_groups is the upcoming round's OWN groups — already resized
+    // if the host changed group size, kept live by RoundController::updateGroupSize.
+    // current_groups shows the last CLOSED round during this same waiting window,
+    // so it's only a fallback for older backends that don't send the new field.
     const groupSource =
-      freshData.current_groups?.length     ? freshData.current_groups :
-      (freshData as any).last_round_groups?.length ? (freshData as any).last_round_groups :
+      (freshData as any).next_round_groups?.length ? (freshData as any).next_round_groups :
+      freshData.current_groups?.length             ? freshData.current_groups :
+      (freshData as any).last_round_groups?.length  ? (freshData as any).last_round_groups :
       [];
 
     if (!groupSource.length) {
-      console.warn('[PGA] No groups found. current_groups:', freshData.current_groups,
+      console.warn('[PGA] No groups found. next_round_groups:', (freshData as any).next_round_groups,
+        '| current_groups:', freshData.current_groups,
         '| last_round_groups:', (freshData as any).last_round_groups,
         '| Full response:', freshData);
     }
 
     setPgaGroups(groupSource.length ? buildPgaGroups(groupSource) : []);
+  };
+
+  // Host taps pause: stops the donor-facing waiting countdown immediately.
+  const pgaPauseTimer = async () => {
+    if (!eventId || pgaPauseLoading) return;
+    setPgaPauseLoading(true);
+    try {
+      await pauseTimer(Number(eventId));
+      setPgaPaused(true);
+    } catch (e) {
+      setPgaToast('Could not pause — please try again.');
+      setTimeout(() => setPgaToast(null), 2500);
+    } finally {
+      setPgaPauseLoading(false);
+    }
+  };
+
+  // Host taps resume, or PGA sheet closes while still paused — either way the
+  // donor countdown picks back up, shifted forward by however long it was paused.
+  const pgaResumeTimer = async () => {
+    if (!eventId || !pgaPaused) return;
+    try {
+      await resumeTimer(Number(eventId));
+    } catch (e) {
+      // Non-fatal — the cron/next poll will still respect the stale pause
+      // flag safely; surfacing a toast here would just be noise on sheet-close.
+    } finally {
+      setPgaPaused(false);
+    }
+  };
+
+  // Single close path for the PGA sheet (backdrop tap, back button, launch) so
+  // pause never gets left dangling for donors if the host just navigates away.
+  const closePGA = () => {
+    setShowPGA(false);
+    if (pgaPaused) pgaResumeTimer();
   };
 
   // ─── PGA interactions ─────────────────────────────────────────────────────
@@ -691,6 +839,103 @@ const handleEndEvent = async () => {
       setPgaMoveLoading(false);
       setTimeout(() => setPgaToast(null), 2500);
     }
+  };
+
+  // Single-member quick move, driven by drag-and-drop below. Same optimistic
+  // update / revert-on-failure shape as pgaMoveMembers, just for one member
+  // and without the Actions sheet in the way.
+  const pgaDragMoveMember = async (fromGroupId: number, toGroupId: number, memberId: string) => {
+    if (!eventId || pgaDragLoading) return;
+    const fromGroup = pgaGroups.find(g => g.id === fromGroupId);
+    const toGroup   = pgaGroups.find(g => g.id === toGroupId);
+    const member    = fromGroup?.members.find(m => m.id === memberId);
+    if (!fromGroup || !toGroup || !member) return;
+
+    setPgaDragLoading(true);
+    setPgaGroups(prev => prev.map(g => {
+      if (g.id === fromGroupId) return { ...g, members: g.members.filter(m => m.id !== memberId) };
+      if (g.id === toGroupId)   return { ...g, members: [...g.members, { ...member, selected: false }] };
+      return g;
+    }));
+
+    try {
+      await moveGroupMembers(Number(eventId), fromGroupId, toGroupId, [member.groupMemberId]);
+      setPgaToast(`${member.name} moved to ${toGroup.label}`);
+    } catch (err) {
+      console.error(err);
+      const fresh = await getEvent(Number(eventId)).catch(() => null);
+      const revertSource =
+        (fresh as any)?.next_round_groups?.length ? (fresh as any).next_round_groups :
+        fresh?.current_groups?.length             ? fresh.current_groups :
+        null;
+      if (revertSource) setPgaGroups(buildPgaGroups(revertSource));
+      setPgaToast('Move failed — changes reverted.');
+    } finally {
+      setPgaDragLoading(false);
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  };
+
+  // Pointer-based drag start for a single member cell. Uses pointer events
+  // (not HTML5 drag-and-drop) so it works on touch/Capacitor WebView as well
+  // as desktop browsers. A small movement threshold distinguishes an actual
+  // drag from a tap, which still toggles selection via the existing onClick.
+  const PGA_DRAG_THRESHOLD = 8;
+
+  const pgaHandleMemberPointerDown = (
+    e: React.PointerEvent,
+    groupId: number,
+    memberId: string,
+    name: string,
+    emoji: string,
+    photoUrl?: string | null,
+  ) => {
+    if (pgaDragLoading) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    pgaDragMovedRef.current = false;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!pgaDragMovedRef.current && Math.hypot(dx, dy) > PGA_DRAG_THRESHOLD) {
+        pgaDragMovedRef.current = true;
+        setPgaDrag({ fromGroupId: groupId, memberId, name, emoji, photoUrl, x: ev.clientX, y: ev.clientY });
+      }
+      if (pgaDragMovedRef.current) {
+        setPgaDrag(prev => (prev ? { ...prev, x: ev.clientX, y: ev.clientY } : prev));
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const target = el?.closest('[data-pga-group-id]') as HTMLElement | null;
+        setPgaDragOverGroupId(target ? Number(target.dataset.pgaGroupId) : null);
+      }
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      if (pgaDragMovedRef.current) {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const target = el?.closest('[data-pga-group-id]') as HTMLElement | null;
+        const toGroupId = target ? Number(target.dataset.pgaGroupId) : null;
+        if (toGroupId && toGroupId !== groupId) {
+          pgaDragMoveMember(groupId, toGroupId, memberId);
+        } else {
+          // Dropped outside any group, or back onto the same group — nothing
+          // to move, but the host should still see that the drop registered
+          // rather than it silently doing nothing.
+          setPgaToast(toGroupId === groupId ? 'Already in that group' : 'Drop on a group to move');
+          setTimeout(() => setPgaToast(null), 2000);
+        }
+      }
+      setPgaDrag(null);
+      setPgaDragOverGroupId(null);
+      // Clear the moved flag a tick after pointerup so the synthetic click that
+      // follows (if any) can still see it and skip toggling selection.
+      setTimeout(() => { pgaDragMovedRef.current = false; }, 0);
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
   };
 
   const pgaRebalance = async () => {
@@ -800,6 +1045,7 @@ const handleEndEvent = async () => {
       await refreshEvent();
       setShowPGA(false);
       setPgaLaunched(true);
+      setPgaPaused(false); // round just opened — pause no longer applies to it
     } catch (e) { console.error(e); }
     finally { setActionLoading(false); }
   };
@@ -946,7 +1192,7 @@ const handleEndEvent = async () => {
   const MAX_DOTS = 20;
 
   const renderDots = (filled: number, total: number, status: string) => {
-    const dotClass = status === 'pending' ? 'filled-orange' : 'filled-teal';
+    const dotClass = status === 've-dot pending' ? 've-dot filled-orange' : 've-dot filled-teal';
     const safeTotal = Math.max(0, total);
     const safeFilled = Math.min(Math.max(0, filled), safeTotal);
     const dotCount = safeTotal > MAX_DOTS ? MAX_DOTS : safeTotal;
@@ -954,7 +1200,7 @@ const handleEndEvent = async () => {
       ? (safeFilled > 0 ? Math.max(1, Math.round((safeFilled / safeTotal) * MAX_DOTS)) : 0)
       : safeFilled;
     return Array.from({ length: dotCount }).map((_, i) => (
-      <div key={i} className={`ve-dot ${i < litCount ? dotClass : ''}`} />
+      <div key={i} className={` ${i < litCount ? dotClass : ''}`} />
     ));
   };
 
@@ -1161,7 +1407,11 @@ const handleCopy = async (text: string, field: string) => {
               <span className="ve-control-label">Group Size</span>
               <span className="ve-control-chip">{effectiveGroupSize || '—'} donors</span>
             </div>
-            {(apiEvent as any)?.can_change_group_size && (
+            {/* Hidden per host request — group size is now changed only from the
+                Proposed Group Allocations sheet, not here. Kept in code (not
+                deleted) in case this is wanted back; flip the `false` to
+                `(apiEvent as any)?.can_change_group_size` to restore it. */}
+            {false && (apiEvent as any)?.can_change_group_size && (
               <div className="ve-config-field" style={{ paddingTop: 8 }}>
                 <label className="ve-config-label">Change Group Size (Round 2 onward)</label>
                 <input className="ve-config-input" type="number" min={2} value={editGroupSize} onChange={(e) => setEditGroupSize(e.target.value)} disabled={groupSizeSaving} />
@@ -1569,7 +1819,7 @@ const handleCopy = async (text: string, field: string) => {
                     {g.donors.map((donor, di) => (
                       <div key={di} className="ve-all-donor-row">
                         <div className="ve-all-donor-top">
-                          <div className="ve-donor-avatar" style={{ background: donor.color }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
+                          <div className="ve-donor-avatar" style={{ background: donor.color }}>{<AvatarContent photoUrl={donor.photoUrl} initial={donor.initial} />}</div>
                           <div className="ve-donor-info">
                             <span className="ve-donor-name">{donor.name}</span>
                             <span className="ve-donor-sub">{donor.sub}</span>
@@ -1616,7 +1866,7 @@ const handleCopy = async (text: string, field: string) => {
             <div className="ve-sheet ve-msg-sheet">
               <div className="ve-sheet-handle" />
               <div className="ve-msg-head">
-                <div className="ve-donor-avatar" style={{ background: msgDonor.color }}>{renderAvatarContent(msgDonor.photoUrl, msgDonor.initial)}</div>
+                <div className="ve-donor-avatar" style={{ background: msgDonor.color }}>{<AvatarContent photoUrl={msgDonor.photoUrl} initial={msgDonor.initial} />}</div>
                 <div className="ve-msg-head-info">
                   <span className="ve-msg-head-name">{msgDonor.name}</span>
                   <span className="ve-msg-head-sub">Delivered when the donor is next active</span>
@@ -1809,7 +2059,7 @@ const handleCopy = async (text: string, field: string) => {
                 <div className="ve-donor-group-label">Payments</div>
                 {summaryData && summaryData.donors.length > 0 ? summaryData.donors.map((d, di) => (
                   <div key={di} className="ve-all-donor-row">
-                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length] }}>{renderAvatarContent(d.photo_url, d.initial)}</div>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length] }}>{<AvatarContent photoUrl={d.photo_url} initial={d.initial} />}</div>
                     <div className="ve-donor-info">
                       <span className="ve-donor-name">{d.pseudonym}</span>
                       <span className="ve-donor-sub">{d.owed > 0 ? `Owes £${d.owed}` : 'No payment due'}</span>
@@ -1851,7 +2101,7 @@ const handleCopy = async (text: string, field: string) => {
               <div className="ve-donor-list">
                 {selectedGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row" style={getDonorRankStyle(donor, selectedGroup.donors)}>
-                    <div className="ve-donor-avatar" style={{ background: donor.color }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
+                    <div className="ve-donor-avatar" style={{ background: donor.color }}>{<AvatarContent photoUrl={donor.photoUrl} initial={donor.initial} />}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span><span className="ve-donor-sub">{donor.sub}</span></div>
                     <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
                     <span className="ve-donor-remove">⊗</span>
@@ -1882,7 +2132,7 @@ const handleCopy = async (text: string, field: string) => {
                 )}
                 {selectedHistoryGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row" style={getHistoryDonorRankStyle(donor, selectedHistoryGroup.donors)}>
-                    <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>{renderAvatarContent(donor.photoUrl, donor.initial)}</div>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>{<AvatarContent photoUrl={donor.photoUrl} initial={donor.initial} />}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span></div>
                     <div className="ve-donor-right">
                       {donor.isQuit
@@ -1904,12 +2154,12 @@ const handleCopy = async (text: string, field: string) => {
         ══════════════════════════════════════════════════════════════════════ */}
         {showPGA && (
           <>
-            <div className="ve-backdrop" onClick={() => setShowPGA(false)} />
+            <div className="ve-backdrop" onClick={closePGA} />
             <div className="ve-sheet ve-sheet--full ve-pga-sheet">
 
               {/* Top bar */}
               <div className="ve-sheet-topbar">
-                <div className="ve-back-btn" onClick={() => setShowPGA(false)}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
+                <div className="ve-back-btn" onClick={closePGA}><img src={`${imgBase}/Back.svg`} alt="back" /></div>
                 <span className="ve-sheet-topbar-title">Proposed Group Allocations</span>
                 <div style={{ width: 36 }} />
               </div>
@@ -1982,8 +2232,17 @@ const handleCopy = async (text: string, field: string) => {
                 )}
                 {pgaGroups.map(group => {
                   const selectedCount = group.members.filter(m => m.selected).length;
+                  const isDragOver = pgaDrag !== null && pgaDragOverGroupId === group.id && pgaDrag.fromGroupId !== group.id;
                   return (
-                    <div key={group.id} className="ve-pga-group-card" style={getPgaGroupRankStyle(group, pgaGroups)}>
+                    <div
+                      key={group.id}
+                      className="ve-pga-group-card"
+                      data-pga-group-id={group.id}
+                      style={{
+                        ...getPgaGroupRankStyle(group, pgaGroups),
+                        ...(isDragOver ? { outline: '2px dashed #2BA7A0', outlineOffset: 2 } : undefined),
+                      }}
+                    >
                       {/* Group header */}
                       <div className="ve-pga-group-header">
                         <div className="ve-pga-group-left">
@@ -2004,17 +2263,28 @@ const handleCopy = async (text: string, field: string) => {
                       {group.expanded && (
                         <div className="ve-pga-group-body">
                           <div className="ve-pga-member-grid">
-                            {group.members.map(member => {
+                            {group.members.map((member, mi) => {
                               const rankColor = (member.isYou && !member.selected) ? getPgaMemberRankColor(member, group.members) : null;
                               return (
                               <button
                                 key={member.id}
                                 className={`ve-pga-member-cell ${member.selected ? 've-pga-member-cell--selected' : ''}`}
-                                style={rankColor ? { background: rankColor, borderColor: rankColor } : undefined}
-                                onClick={() => pgaToggleMember(group.id, member.id)}
+                                style={{
+                                  ...(rankColor ? { background: rankColor, borderColor: rankColor } : undefined),
+                                  touchAction: 'none',
+                                }}
+                                onPointerDown={(e) => pgaHandleMemberPointerDown(e, group.id, member.id, member.name, member.emoji, member.photoUrl)}
+                                onClick={() => { if (pgaDragMovedRef.current) return; pgaToggleMember(group.id, member.id); }}
                               >
-                                <div className="ve-pga-avatar-wrap" style={rankColor ? { background: '#fff', borderRadius: '50%' } : undefined}>
-                                  <span className="ve-pga-avatar">{member.emoji}</span>
+                                <div
+                                  className="ve-pga-avatar-wrap"
+                                  style={
+                                    rankColor
+                                      ? { background: '#fff', borderRadius: '50%' }
+                                      : { background: COLORS[mi % COLORS.length], borderRadius: '50%', overflow: 'hidden' }
+                                  }
+                                >
+                                  <span className="ve-pga-avatar">{<AvatarContent photoUrl={member.photoUrl} initial={member.initial} />}</span>
                                   {member.selected && (
                                     <span className="ve-pga-check">
                                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -2045,8 +2315,51 @@ const handleCopy = async (text: string, field: string) => {
                 <div style={{ height: 110 }} />
               </div>
 
+              {/* Floating drag ghost — follows the pointer while dragging a member */}
+              {pgaDrag && createPortal(
+                <div style={{
+                  position: 'fixed',
+                  left: pgaDrag.x - 28,
+                  top: pgaDrag.y - 28,
+                  width: 56, height: 56,
+                  borderRadius: '50%',
+                  background: '#fff',
+                  border: '2px solid #2BA7A0',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 24,
+                  pointerEvents: 'none',
+                  zIndex: 9999,
+                  boxShadow: '0 6px 16px rgba(0,0,0,0.25)',
+                }}>
+                  {<AvatarContent photoUrl={pgaDrag.photoUrl} initial={pgaDrag.emoji} />}
+                </div>,
+                document.body
+              )}
+
               {/* Sticky footer */}
               <div className="ve-pga-footer">
+                {/* Waiting timer + pause control — pausing freezes the donor-facing
+                    countdown immediately; a "Host has paused" message shows on the
+                    donor side. Closing this sheet auto-resumes if still paused.
+                    Single full-width button (same shape as Launch Round) instead of
+                    a text label + separate pill button, so timer + pause/resume read
+                    as one control. */}
+                {waitingSecs > 0 && (
+                  <div
+                    className="ve-launch-btn"
+                    style={{
+                      background: '#2BA7A0',
+                      marginBottom: 10,
+                      opacity: pgaPauseLoading ? 0.6 : 1,
+                      cursor: pgaPauseLoading ? 'not-allowed' : 'pointer',
+                    }}
+                    onClick={pgaPauseLoading ? undefined : (pgaPaused ? pgaResumeTimer : pgaPauseTimer)}
+                  >
+                    {pgaPaused
+                      ? `Paused (${formatTimer(waitingSecs)}) — ${pgaPauseLoading ? '…' : 'Tap to Resume'}`
+                      : `Waiting: ${formatTimer(waitingSecs)} — ${pgaPauseLoading ? '…' : 'Tap to Pause'}`}
+                  </div>
+                )}
                 <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={pgaLaunchNextRound}>
                   {actionLoading ? 'Launching…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
                 </div>
@@ -2105,7 +2418,7 @@ const handleCopy = async (text: string, field: string) => {
                   {fromGroupForSheet && (
                     <div className="ve-pga-move-avatars">
                       {fromGroupForSheet.members.filter(m => m.selected).slice(0, 4).map(m => (
-                        <span key={m.id} className="ve-pga-move-avatar">{m.emoji}</span>
+                        <span key={m.id} className="ve-pga-move-avatar">{<AvatarContent photoUrl={m.photoUrl} initial={m.initial} />}</span>
                       ))}
                     </div>
                   )}
@@ -2114,7 +2427,7 @@ const handleCopy = async (text: string, field: string) => {
                   <div className="ve-pga-move-group-list">
                     {pgaGroups.map(g => {
                       const isCurrent  = g.id === moveSheet.fromGroupId;
-                      const groupSize  = effectiveGroupSize || 999;
+                      const groupSize  = pgaEffectiveGroupSize || 999;
                       const wouldFill  = g.members.length + moveSheet.selectedMemberIds.length;
                       const isFull     = !isCurrent && g.members.length >= groupSize;
                       const wouldOver  = !isCurrent && wouldFill > groupSize;
@@ -2137,10 +2450,10 @@ const handleCopy = async (text: string, field: string) => {
                 </div>
               </div>
             )}
-
-            {pgaToast && <div className="ve-pga-toast">{pgaToast}</div>}
           </>
         )}
+
+        {pgaToast && <div className="ve-pga-toast">{pgaToast}</div>}
 
       </IonContent>
     </IonPage>
