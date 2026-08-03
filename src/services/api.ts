@@ -71,6 +71,7 @@ export interface ApiError {
   message: string;
   errors?: Record<string, string[]>; // Laravel validation errors
   status: number;
+  data?: any; // full response body — for custom fields beyond message/errors (e.g. group_full, too_few_remaining)
 }
 
 function normaliseError(error: AxiosError): ApiError {
@@ -79,6 +80,7 @@ function normaliseError(error: AxiosError): ApiError {
     message: data?.message ?? error.message ?? 'Something went wrong',
     errors: data?.errors ?? undefined,
     status: error.response?.status ?? 0,
+    data,
   };
 }
 

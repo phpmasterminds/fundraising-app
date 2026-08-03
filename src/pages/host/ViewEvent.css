@@ -1563,7 +1563,7 @@
     margin-bottom: 16px;
 }
 
-.ve-pga-move-avatar { font-size: 30px; }
+.ve-pga-move-avatar { font-size: 30px; width:50px; }
 
 /* Group destination rows */
 .ve-pga-move-group-list {

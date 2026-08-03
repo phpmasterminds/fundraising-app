@@ -1396,7 +1396,7 @@ const confirmQuit = async () => {
         </div>
         <div className="bf-card bf-card--row bf-card--cumul">
           <div>
-            <p className="bf-card-title bf-card-title--sm">Total You've Bid</p>
+            <p className="bf-card-title bf-card-title--sm">Total matched amount</p>
             <p className="bf-card-lbl" style={{ marginTop: 2 }}>Across all rounds · not your payment</p>
           </div>
           <span className="bf-cumul-val">£{fmtAmount(displayCumulative)}</span>

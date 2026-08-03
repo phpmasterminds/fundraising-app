@@ -271,10 +271,11 @@ export async function moveGroupMembers(
   fromGroupId: number,
   toGroupId: number,
   groupMemberIds: number[],
+  overrideCapacity: boolean = false,
 ): Promise<{ message: string; moved_count: number }> {
   const { data } = await api.post(
     `/host/events/${eventId}/groups/${fromGroupId}/move-members`,
-    { to_group_id: toGroupId, group_member_ids: groupMemberIds },
+    { to_group_id: toGroupId, group_member_ids: groupMemberIds, override_capacity: overrideCapacity },
   );
   return data;
 }

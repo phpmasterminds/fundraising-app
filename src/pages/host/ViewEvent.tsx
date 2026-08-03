@@ -170,7 +170,7 @@ const ViewEvent: React.FC = () => {
   const location = useLocation();
 
   const [showSettings, setShowSettings]           = useState(false);
-  const [selectedGroup, setSelectedGroup]         = useState<Group | null>(null);
+  const [selectedGroupKey, setSelectedGroupKey]   = useState<string | null>(null); // NEW: store only the group's name (not a frozen snapshot) so the open sheet re-derives from live apiEvent data on every poll, instead of staying stale until closed/reopened
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<{ name: string; statusLabel: string; donors: HistoryDonor[] } | null>(null);
   const [ignoreZeroBids, setIgnoreZeroBids]       = useState(false);
   const [showQR, setShowQR]                       = useState(false);
@@ -244,6 +244,18 @@ const ViewEvent: React.FC = () => {
   const [pgaDragOverGroupId, setPgaDragOverGroupId] = useState<number | null>(null);
   const [pgaDragLoading, setPgaDragLoading] = useState(false);
   const pgaDragMovedRef = useRef(false);
+
+  // PGA move confirm/error modals — surface backend rules the drag flow can't
+  // precompute client-side (the destination sheet already disables over-capacity
+  // rows, but drag-and-drop has no such client-side guard).
+  const [pgaOverflowConfirm, setPgaOverflowConfirm] = useState<{
+    fromGroupId: number;
+    toGroupId: number;
+    memberIds: number[];
+    toGroupLabel: string;
+  } | null>(null);
+  const [pgaOverflowLoading, setPgaOverflowLoading] = useState(false);
+  const [pgaMoveErrorModal, setPgaMoveErrorModal] = useState<string | null>(null);
 
   const eventId = new URLSearchParams(location.search).get('id');
 
@@ -564,6 +576,15 @@ const handleEndEvent = async () => {
 
   // ─── Derived values ───────────────────────────────────────────────────────
   const groups: Group[]     = apiEvent?.current_groups?.length ? mapGroups(apiEvent.current_groups) : [];
+  // NEW: selectedGroup is now DERIVED from the live `groups` array (recomputed every render from
+  // apiEvent, which the existing poll effect refreshes) instead of being a frozen snapshot captured
+  // at click time. This is what makes a newly-arrived bid show up inside an already-open group sheet
+  // without the host having to close and reopen it. setSelectedGroup keeps its original name/signature
+  // so every existing call site below (open on row click, close on backdrop/close-button) is untouched.
+  const selectedGroup: Group | null = selectedGroupKey
+    ? (groups.find((g) => g.name === selectedGroupKey) ?? null)
+    : null;
+  const setSelectedGroup = (g: Group | null) => setSelectedGroupKey(g ? g.name : null);
   const rounds: RoundData[] = apiEvent?.rounds_overview?.length ? mapRounds(apiEvent.rounds_overview) : [];
 
   // Host Summary sheet data (round-wise group min/max/total + per-donor settlement).
@@ -623,8 +644,11 @@ const handleEndEvent = async () => {
   })();
 
   const scaleLabels = targetAmount > 0
-    ? [0.33, 0.66, 1].map(f => { const v = Math.round(targetAmount * f); return v >= 1000 ? `£${Math.round(v / 1000)}k` : `£${v}`; })
-    : ['£5k', '£10k', '£15k'];
+    ? [0.25, 0.5, 1].map(f => {
+        const label = `${Math.round(f * 100)}%`;
+        return { pct: f * 100, label };
+      })
+    : [{ pct: 25, label: '25%' }, { pct: 50, label: '50%' }, { pct: 100, label: '100%' }];
 
   // Reset pgaLaunched once a new round is actually open
   useEffect(() => {
@@ -829,12 +853,22 @@ const handleEndEvent = async () => {
       await moveGroupMembers(Number(eventId), fromGroupId, toGroupId, selectedMemberIds);
       const count = selectedMemberIds.length;
       setPgaToast(`${count} member${count !== 1 ? 's' : ''} moved to ${toGroup?.label}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       // Rollback optimistic update
       await refreshEvent();
       if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
-      setPgaToast('Move failed — changes reverted.');
+
+      const errData = err?.data;
+      if (errData?.too_few_remaining) {
+        // Hard rule — never overridable. Revert only, then block with an explanation.
+        setPgaMoveErrorModal(errData.message ?? 'Groups must have at least 2 members.');
+      } else if (errData?.group_full) {
+        // Soft rule — ask the host whether to proceed anyway.
+        setPgaOverflowConfirm({ fromGroupId, toGroupId, memberIds: selectedMemberIds, toGroupLabel: toGroup?.label ?? 'this group' });
+      } else {
+        setPgaToast('Move failed — changes reverted.');
+      }
     } finally {
       setPgaMoveLoading(false);
       setTimeout(() => setPgaToast(null), 2500);
@@ -861,7 +895,7 @@ const handleEndEvent = async () => {
     try {
       await moveGroupMembers(Number(eventId), fromGroupId, toGroupId, [member.groupMemberId]);
       setPgaToast(`${member.name} moved to ${toGroup.label}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       const fresh = await getEvent(Number(eventId)).catch(() => null);
       const revertSource =
@@ -869,9 +903,53 @@ const handleEndEvent = async () => {
         fresh?.current_groups?.length             ? fresh.current_groups :
         null;
       if (revertSource) setPgaGroups(buildPgaGroups(revertSource));
-      setPgaToast('Move failed — changes reverted.');
+
+      const errData = err?.data;
+      if (errData?.too_few_remaining) {
+        // Hard rule — never overridable. Revert only, then block with an explanation.
+        setPgaMoveErrorModal(errData.message ?? 'Groups must have at least 2 members.');
+      } else if (errData?.group_full) {
+        // Soft rule — ask the host whether to proceed anyway.
+        setPgaOverflowConfirm({ fromGroupId, toGroupId, memberIds: [member.groupMemberId], toGroupLabel: toGroup.label });
+      } else {
+        setPgaToast('Move failed — changes reverted.');
+      }
     } finally {
       setPgaDragLoading(false);
+      setTimeout(() => setPgaToast(null), 2500);
+    }
+  };
+
+  // Host confirmed they want to proceed despite exceeding the recommended group
+  // size (the group_full soft-block above). Resubmits the same move with
+  // override_capacity so the backend's hard rule is the only one still enforced.
+  const pgaConfirmOverflowMove = async () => {
+    if (!pgaOverflowConfirm || !eventId) return;
+    const { fromGroupId, toGroupId, memberIds, toGroupLabel } = pgaOverflowConfirm;
+    setPgaOverflowLoading(true);
+
+    const fromGroup = pgaGroups.find(g => g.id === fromGroupId);
+    const movedMembers = (fromGroup?.members ?? [])
+      .filter(m => memberIds.includes(m.groupMemberId))
+      .map(m => ({ ...m, selected: false }));
+    setPgaGroups(prev => prev.map(g => {
+      if (g.id === fromGroupId) return { ...g, members: g.members.filter(m => !memberIds.includes(m.groupMemberId)) };
+      if (g.id === toGroupId)   return { ...g, members: [...g.members, ...movedMembers] };
+      return g;
+    }));
+
+    try {
+      await moveGroupMembers(Number(eventId), fromGroupId, toGroupId, memberIds, true);
+      const count = memberIds.length;
+      setPgaToast(`${count} member${count !== 1 ? 's' : ''} moved to ${toGroupLabel}`);
+    } catch (err) {
+      console.error(err);
+      await refreshEvent();
+      if (apiEvent?.current_groups) setPgaGroups(buildPgaGroups(apiEvent.current_groups));
+      setPgaToast('Move failed — changes reverted.');
+    } finally {
+      setPgaOverflowLoading(false);
+      setPgaOverflowConfirm(null);
       setTimeout(() => setPgaToast(null), 2500);
     }
   };
@@ -1478,11 +1556,37 @@ const handleCopy = async (text: string, field: string) => {
                 <span className="ve-progress-label">Progress to Target</span>
                 <span className="ve-progress-amount">£{totalRaised.toLocaleString()} / £{targetAmount.toLocaleString()}</span>
               </div>
-              <div className="ve-progress-track">
+              <div className="ve-progress-track" style={{ position: 'relative' }}>
                 <div className="ve-progress-fill" style={{ width: `${progressPercent}%` }} />
+                {scaleLabels.map((l, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      bottom: 0,
+                      left: `${l.pct}%`,
+                      width: '2px',
+                      transform: l.pct >= 100 ? 'translateX(-100%)' : 'translateX(-1px)',
+                      background: 'rgba(0,0,0,0.15)',
+                    }}
+                  />
+                ))}
               </div>
-              <div className="ve-progress-scale">
-                {scaleLabels.map((l, i) => <span key={i}>{l}</span>)}
+              <div className="ve-progress-scale" style={{ position: 'relative', height: '1em' }}>
+                {scaleLabels.map((l, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      left: `${l.pct}%`,
+                      transform: l.pct >= 100 ? 'translateX(-100%)' : l.pct <= 0 ? 'translateX(0)' : 'translateX(-50%)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {l.label}
+                  </span>
+                ))}
               </div>
             </div>
           </div>
@@ -2058,14 +2162,14 @@ const handleCopy = async (text: string, field: string) => {
                 {/* Per-donor settlement — shown once per donor */}
                 <div className="ve-donor-group-label">Payments</div>
                 {summaryData && summaryData.donors.length > 0 ? summaryData.donors.map((d, di) => (
-                  <div key={di} className="ve-all-donor-row">
-                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length] }}>{<AvatarContent photoUrl={d.photo_url} initial={d.initial} />}</div>
-                    <div className="ve-donor-info">
+                  <div key={di} className="ve-all-donor-row" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'nowrap', width: '100%', textAlign: 'left' }}>
+                    <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length], flexShrink: 0 }}>{<AvatarContent photoUrl={d.photo_url} initial={d.initial} />}</div>
+                    <div className="ve-donor-info" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <span className="ve-donor-name">{d.pseudonym}</span>
                       <span className="ve-donor-sub">{d.owed > 0 ? `Owes £${d.owed}` : 'No payment due'}</span>
                     </div>
-                    <div className="ve-all-donor-amounts">
-                      <div className="ve-all-donor-col">
+                    <div className="ve-all-donor-amounts" style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, marginLeft: 'auto' }}>
+                      <div className="ve-all-donor-col" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                         <span className="ve-all-donor-col-label">Payment</span>
                         {d.owed === 0
                           ? <span className="ve-donor-bidding">—</span>
@@ -2074,7 +2178,7 @@ const handleCopy = async (text: string, field: string) => {
                             : <span className="ve-donor-bidding-orange">Unpaid</span>}
                       </div>
                       {d.paid_at && (
-                        <div className="ve-all-donor-col">
+                        <div className="ve-all-donor-col" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                           <span className="ve-all-donor-col-label">Paid on</span>
                           <span className="ve-all-donor-col-val">{d.paid_at}</span>
                         </div>
@@ -2449,6 +2553,51 @@ const handleCopy = async (text: string, field: string) => {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* ══ Move confirm: destination would exceed the recommended group size ══ */}
+            {pgaOverflowConfirm && (
+              <>
+                <div className="ve-backdrop" onClick={() => { if (!pgaOverflowLoading) setPgaOverflowConfirm(null); }} />
+                <div className="ve-sheet">
+                  <div className="ve-sheet-handle" />
+                  <div className="ve-sheet-header">
+                    <h3 className="ve-sheet-title">Group is full</h3>
+                  </div>
+                  <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                    Moving {pgaOverflowConfirm.memberIds.length === 1 ? 'this member' : `these ${pgaOverflowConfirm.memberIds.length} members`} will put {pgaOverflowConfirm.toGroupLabel} over the recommended group size. Move anyway?
+                  </p>
+                  <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                    <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!pgaOverflowLoading) setPgaOverflowConfirm(null); }}>Cancel</div>
+                    <div
+                      className="ve-call-time-btn"
+                      style={{ flex: 1, opacity: pgaOverflowLoading ? 0.6 : 1 }}
+                      onClick={pgaOverflowLoading ? undefined : pgaConfirmOverflowMove}
+                    >
+                      {pgaOverflowLoading ? 'Moving…' : 'Move anyway'}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ══ Blocking error: move would leave a group with fewer than 2 members ══ */}
+            {pgaMoveErrorModal && (
+              <>
+                <div className="ve-backdrop" onClick={() => setPgaMoveErrorModal(null)} />
+                <div className="ve-sheet">
+                  <div className="ve-sheet-handle" />
+                  <div className="ve-sheet-header">
+                    <h3 className="ve-sheet-title">Can't move members</h3>
+                  </div>
+                  <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                    {pgaMoveErrorModal}
+                  </p>
+                  <div style={{ padding: '0 20px 8px' }}>
+                    <div className="ve-sheet-close" style={{ marginTop: 0 }} onClick={() => setPgaMoveErrorModal(null)}>OK</div>
+                  </div>
+                </div>
+              </>
             )}
           </>
         )}

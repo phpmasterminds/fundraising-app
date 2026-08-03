@@ -4,6 +4,7 @@ import { useParams, useHistory } from 'react-router-dom';
 import { Browser } from '@capacitor/browser';
 import { getPaymentSummary, markPaid, PaymentSummary } from '../../services/donorEvents';
 import { usePaymentGate } from '../../components/PaymentGate';
+import { Heart } from "lucide-react";
 
 /**
  * Standalone payment page — the redirect target for the app-wide PaymentGuard.
@@ -138,10 +139,16 @@ const PaymentPage: React.FC = () => {
             <>
               <div className="pp-hero">
                 <div className="pp-heart">
-                  <svg width="30" height="30" viewBox="0 0 36 36" fill="none">
-                    <path d="M18 28s-12-7.5-12-15a7 7 0 0114 0 7 7 0 0114 0c0 7.5-12 15-16 15z" fill="#fff"/>
-                  </svg>
-                </div>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="32"
+    height="32"
+    viewBox="0 0 24 24"
+    fill="white"
+  >
+    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5A4.5 4.5 0 016.5 4c1.74 0 3.41.81 4.5 2.09A6.02 6.02 0 0115.5 4 4.5 4.5 0 0120 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+  </svg>
+</div>
                 <p className="pp-thanks">Thank you, <strong>{summary.donor_name}</strong></p>
                 <p className="pp-sub">The event has concluded. Your total donation is:</p>
                 <p className="pp-amount">£{summary.total_amount}</p>
@@ -233,7 +240,27 @@ const PaymentPage: React.FC = () => {
           .pp-profile{ border:none; background:transparent; color:#16837E; font-family:'Outfit',sans-serif; font-weight:600; font-size:14px; padding:6px 4px; }
           .pp-state{ text-align:center; color:#5B6068; font-size:15px; padding:60px 10px; }
           .pp-hero{ text-align:center; padding:12px 0 20px; }
-          .pp-heart{ width:64px; height:64px; border-radius:50%; background:#2BA7A0; display:flex; align-items:center; justify-content:center; margin:0 auto 14px; }
+          .pp-heart {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #2BA7A0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    margin: 0 auto 20px;
+
+    box-shadow:
+        0 8px 24px rgba(43,167,160,.25),
+        inset 0 1px 0 rgba(255,255,255,.25);
+}
+
+.pp-heart svg{
+    width:32px;
+    height:32px;
+}
           .pp-thanks{ font-size:20px; font-weight:700; color:#1A1A2E; margin:0 0 6px; }
           .pp-sub{ font-size:14px; color:#5B6068; margin:0 0 10px; }
           .pp-amount{ font-size:40px; font-weight:800; color:#C4811F; margin:4px 0; }
