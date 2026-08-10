@@ -448,6 +448,32 @@ const ViewEvent: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiEvent?.status, eventId, roundEnding]);
 
+  // ─── Summary sheet payment polling (any event status) ─────────────────────
+  // The main poll above only runs while the event is 'live', but donors settle
+  // payments after the event finishes too. While the Summary sheet is open,
+  // refresh independently every 5s so payment_status updates without the user
+  // having to close/reopen the sheet.
+  useEffect(() => {
+    if (!showSummary) return;
+    const id = setInterval(() => { refreshEvent(); }, 5000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSummary, eventId]);
+
+  // ─── "Paid" stat card polling (finished events, Summary sheet closed) ─────
+  // The main live-event poll above stops once status flips to 'finished', and
+  // the Summary-sheet poll only runs while that sheet is open. That leaves the
+  // top-level "Paid x/y" stat card frozen at whatever it showed the moment the
+  // event finished, even though donors keep settling payments afterwards.
+  // This adds an independent 5s refresh, scoped to finished events only, so
+  // the stat card updates on its own without needing the Summary sheet opened.
+  useEffect(() => {
+    if (apiEvent?.status !== 'finished') return;
+    const id = setInterval(() => { refreshEvent(); }, 5000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEvent?.status, eventId]);
+
   const formatTimer = (secs: number) => {
     const m = String(Math.floor(secs / 60)).padStart(2, '0');
     const s = String(secs % 60).padStart(2, '0');
@@ -789,11 +815,11 @@ const handleEndEvent = async () => {
     }
   };
 
-  // Single close path for the PGA sheet (backdrop tap, back button, launch) so
-  // pause never gets left dangling for donors if the host just navigates away.
+  // Single close path for the PGA sheet (backdrop tap, back button, launch).
+  // Closing the sheet must NOT resume the timer — if the host paused it,
+  // it stays paused (for donors too) until the host explicitly taps Resume.
   const closePGA = () => {
     setShowPGA(false);
-    if (pgaPaused) pgaResumeTimer();
   };
 
   // ─── PGA interactions ─────────────────────────────────────────────────────
@@ -1288,6 +1314,12 @@ const handleEndEvent = async () => {
     return                                     { label: 'Waiting', cls: 'badge-waiting' };
   };
 
+  // True when any donor in this group has an unread reply — drives the red
+  // dot on the group card in the host's Round Details view (same source of
+  // truth, unreadDonorIds, as the All Donors and Group Detail Sheet dots).
+  const groupHasUnread = (group: Group) =>
+    group.donors.some((d) => d.groupMemberId != null && unreadDonorIds.has(d.groupMemberId));
+
   /* ── Bid-rank colour coding (green = highest, red = lowest, orange = middle) ── */
   const parseAmount = (val?: string | null): number => {
     if (!val) return 0;
@@ -1524,7 +1556,10 @@ const handleCopy = async (text: string, field: string) => {
                 <p className="ve-stat-value">£{totalRaised.toLocaleString()}</p>
                 <p className="ve-stat-label">Raised</p>
               </div>
-              <div className="ve-stat-card" style={{ cursor: 'pointer' }} onClick={() => { closeAll(); setShowAllDonors(true); }}>
+              <div className="ve-stat-card" style={{ cursor: 'pointer', position: 'relative' }} onClick={() => { closeAll(); setShowAllDonors(true); }}>
+                {unreadDonorIds.size > 0 && (
+                  <span style={{ position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: '50%', background: '#E53E3E' }} />
+                )}
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path d="M13.5 17v-1.5A3 3 0 0010.5 12h-6a3 3 0 00-3 3.5V17" stroke="#2BA7A0" strokeWidth="1.6" strokeLinecap="round" />
                   <circle cx="7.5" cy="6.5" r="2.5" stroke="#2BA7A0" strokeWidth="1.6" />
@@ -1641,7 +1676,10 @@ const handleCopy = async (text: string, field: string) => {
               {groups.length > 0 ? (
                 <div className="ve-group-grid">
                   {groups.map((group, i) => (
-                    <div key={i} className={getGroupCardClass(group.status)} style={getGroupRankStyle(group)} onClick={() => setSelectedGroup(group)}>
+                    <div key={i} className={getGroupCardClass(group.status)} style={{ ...getGroupRankStyle(group), position: 'relative' }} onClick={() => setSelectedGroup(group)}>
+                      {groupHasUnread(group) && (
+                        <span style={{ position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: '50%', background: '#E53E3E' }} />
+                      )}
                       <div className="ve-group-header">
                         <span className="ve-group-name">{group.name}</span>
                         {getStatusIcon(group.status)}
@@ -2200,13 +2238,25 @@ const handleCopy = async (text: string, field: string) => {
               <div className="ve-sheet-handle" />
               <div className="ve-sheet-header">
                 <h3 className="ve-sheet-title">{selectedGroup.name}</h3>
-                <span className={`ve-sheet-badge ${getGroupBadge(selectedGroup).cls}`}>{getGroupBadge(selectedGroup).label}</span>
+                <span
+                  className={`ve-sheet-badge ${getGroupBadge(selectedGroup).cls}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelectedGroup(null)}
+                >{getGroupBadge(selectedGroup).label}</span>
               </div>
               <div className="ve-donor-list">
                 {selectedGroup.donors.map((donor, i) => (
                   <div key={i} className="ve-donor-row" style={getDonorRankStyle(donor, selectedGroup.donors)}>
                     <div className="ve-donor-avatar" style={{ background: donor.color }}>{<AvatarContent photoUrl={donor.photoUrl} initial={donor.initial} />}</div>
                     <div className="ve-donor-info"><span className="ve-donor-name">{donor.name}</span><span className="ve-donor-sub">{donor.sub}</span></div>
+                    {donor.groupMemberId ? (
+                      <button className="ve-donor-msg-btn" onClick={() => openMsgModal(donor)} aria-label="Message donor">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                          <path d="M3 4.5h12a1 1 0 011 1V12a1 1 0 01-1 1H7l-3 2.5V13H3a1 1 0 01-1-1V5.5a1 1 0 011-1z" stroke="#2BA7A0" strokeWidth="1.4" strokeLinejoin="round"/>
+                        </svg>
+                        {unreadDonorIds.has(donor.groupMemberId) && <span className="ve-donor-msg-dot" />}
+                      </button>
+                    ) : null}
                     <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
                     <span className="ve-donor-remove">⊗</span>
                   </div>
@@ -2271,7 +2321,6 @@ const handleCopy = async (text: string, field: string) => {
               {/* Summary bar */}
               <div className="ve-pga-summary-bar">
                 <span className="ve-pga-total">Total: {pgaTotalPeople} people</span>
-                <button className="ve-pga-rebalance-btn" onClick={pgaRebalance}>Rebalance</button>
               </div>
 
               {/* Group size OPTIONS — only while the host is still allowed to change it

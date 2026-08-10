@@ -1,4 +1,4 @@
-    * {
+* {
         box-sizing: border-box;
     }
     
@@ -80,6 +80,9 @@
         background: #F2F2F2;
         border-radius: 50%;
         overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
     
     .preview {

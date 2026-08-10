@@ -835,7 +835,7 @@ const BidFlow: React.FC = () => {
       setConfirmBidOpen(false);
       setThanksOpen(true); // stay on the bid screen; donor can keep updating the bid until the round completes
     } catch (e: any) {
-      setSubmitError(e?.response?.data?.message ?? 'Failed to submit bid. Please try again.');
+      setSubmitError(e?.message ?? 'Failed to submit bid. Please try again.');
     } finally { setSubmitting(false); }
   };
 
@@ -852,7 +852,7 @@ const confirmQuit = async () => {
     // never release — the donor would be shown a "you've quit" screen while
     // still being held inside the event, with no way out.
     setQuitError(
-      err?.response?.data?.message ?? 'Could not quit the event. Please try again.'
+      err?.message ?? 'Could not quit the event. Please try again.'
     );
     setQuitting(false);
     return;
@@ -965,6 +965,23 @@ const confirmQuit = async () => {
     : isWaitingStatus && completedRoundBid
       ? completedRoundBid.amount  // best we have: donor's own bid for that round
       : liveMinBid;
+
+  // Floor a donor may not submit below. Deliberately computed from OTHER group
+  // members' bids only (never the donor's own live/in-progress amount) — matchedAmount
+  // above is a *live* figure that recalculates to include whatever the donor is
+  // currently typing, so using it directly as the floor would let the floor chase
+  // itself downward as the donor lowers their own number. Once the backend has closed
+  // the round and returned an authoritative matched_amount, that becomes the floor instead.
+  const otherGroupAmounts = (myGroup?.members ?? [])
+    .filter((m: any) => !m?.is_you)
+    .map((m: any) => roundBids.find((b: any) => !b.is_you && b.pseudonym === m.pseudonym)?.amount ?? 0)
+    .filter((a: number) => a > 0);
+  const minimumAllowedBid = roundData?.matched_amount !== null && roundData?.matched_amount !== undefined
+    ? roundData.matched_amount
+    : otherGroupAmounts.length > 0
+      ? Math.min(...otherGroupAmounts)
+      : 0;
+
   const groupTotal = roundData?.group_total !== null && roundData?.group_total !== undefined
     ? roundData.group_total
     : matchedAmount * actualInGroup; // matched amount x members in group (client rule)
@@ -1354,7 +1371,7 @@ const confirmQuit = async () => {
                   return {
                     pseudonym: m.pseudonym,
                     initial: m.initial,
-                    amount: m.is_you ? myBid : (match?.amount ?? 0),
+                    amount: m.is_you ? (myBidPlaced ? myBid : 0) : (match?.amount ?? 0),
                     is_you: m.is_you,
                     is_minimum: match?.is_minimum ?? false,
                   };
