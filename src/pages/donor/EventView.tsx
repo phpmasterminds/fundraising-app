@@ -141,6 +141,19 @@ useEffect(() => {
     return () => clearInterval(timer);
   }, [isActive, seconds]);
 
+  // ── Stale last-visited redirect ─────────────────────────────
+  // If the fetch failed (event deleted, e.g. a donor's last_visited_path
+  // pointing at a since-removed event) send the donor somewhere useful
+  // instead of stranding them on "Event not found". Delayed so the
+  // message is readable; 'replace' so back-button doesn't loop here.
+  useEffect(() => {
+    if (loading || event || !eventId) return;
+    const timer = setTimeout(() => {
+      router.push(isLoggedIn ? '/devents' : '/join', 'root', 'replace');
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [loading, event, eventId, isLoggedIn]);
+
   // ── Join handler ─────────────────────────────────────────────
   const handleJoin = () => {
     if (!event) return;
@@ -207,8 +220,11 @@ useEffect(() => {
     return (
       <IonPage>
         <IonContent fullscreen className="event-view">
-          <div className="container" >
-            Event not found.
+          <div className="container" style={{ textAlign: 'center', paddingTop: 40 }}>
+            <p>Event not found.</p>
+            <p style={{ color: '#9AA0A6', fontSize: 14 }}>
+              This event may have been removed. Redirecting you…
+            </p>
           </div>
         </IonContent>
       </IonPage>

@@ -85,6 +85,12 @@ const BidFlow: React.FC = () => {
     setLastBidAmountState(n);
   };
 
+  // ★ Optimistic "I have bid this round" flag. The server-derived myBidPlaced only
+  // flips once the next poll of round-status returns, so the group cards stayed
+  // uncoloured for a beat after submitting. Stamped with the round number so it
+  // self-clears the moment a new round starts (round no longer matches).
+  const [locallyBidRound, setLocallyBidRound] = useState<number | null>(null);
+
   const [currentRound,  setCurrentRound] = useState(1);
   const [roundData,     setRoundData]    = useState<RoundState | null>(null);
   const [groupBidsOpen, setGroupBidsOpen]= useState(false);
@@ -143,6 +149,8 @@ const BidFlow: React.FC = () => {
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const rafRef        = useRef<number>(0);
   const particles     = useRef<Particle[]>([]);
+  // Guards the £0-pledge auto-skip below from firing more than once per payment-intro visit
+  const zeroPledgeHandledRef = useRef(false);
 
   /* ══════ EFFECTS ══════ */
 
@@ -171,11 +179,14 @@ const BidFlow: React.FC = () => {
     clearInterval(roundTimerRef.current);
     clearInterval(waitTimerRef.current);
     clearInterval(pollRef.current);
-    // Re-seed lastBidAmount from localStorage for this specific event
+    // Re-seed lastBidAmount from localStorage for this specific event (kept in
+    // state/localStorage for potential reuse), but no longer auto-fills the bid
+    // box on mount — each fresh round's default must be £0, not the donor's
+    // previous round's amount. Same-round refresh restore is handled separately
+    // by the peerfund_bidplaced_ check in Effect 1 just below.
     const saved = localStorage.getItem(`peerfund_lastbid_${stateEventId}`);
     const n = saved ? parseInt(saved, 10) : 0;
     setLastBidAmountState(n);
-    if (n > 0) { setBidAmount(n); setInputVal(String(n)); }
   }, [stateEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 1. Fetch event meta on mount + check if event already finished
@@ -361,7 +372,7 @@ const BidFlow: React.FC = () => {
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
-          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setScreen('confirm-bid');
           return;
         }
@@ -578,7 +589,7 @@ const BidFlow: React.FC = () => {
           setWaitingSecsLeft(null);
           setHostPaused(false);
           setRoundEnding(false);
-          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setScreen('confirm-bid');
           return;
         }
@@ -646,7 +657,7 @@ const BidFlow: React.FC = () => {
           } catch (_) {
             setRoundSecsLeft(res.seconds_left);
           }
-          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setScreen('confirm-bid');
           return;
         }
@@ -719,7 +730,7 @@ const BidFlow: React.FC = () => {
           setWaitingSecsLeft(null);
           setHostPaused(false);
           setRoundEnding(false);
-          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setScreen('confirm-bid');
           return;
         }
@@ -763,7 +774,7 @@ const BidFlow: React.FC = () => {
             setCurrentRound(res.current_round);
             setRoundSecsLeft(res.seconds_left);
           }
-          setBidAmount(lastBidAmount); setInputVal(String(lastBidAmount));
+          setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setScreen('confirm-bid');
         } else if (res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
@@ -830,6 +841,7 @@ const BidFlow: React.FC = () => {
     try {
       await submitBid(eventId, bidAmount);
       setLastBidAmount(bidAmount);
+      setLocallyBidRound(currentRound); // ★ colour the group cards now, don't wait for the poll
       // Lock this donor's bid for THIS round so a page refresh can't reopen the editor.
       localStorage.setItem(`peerfund_bidplaced_${stateEventId}_${currentRound}`, String(bidAmount));
       setConfirmBidOpen(false);
@@ -923,7 +935,11 @@ const confirmQuit = async () => {
   // backend flag (my_bid_placed); otherwise infer — a placed bid means my_bid is a real
   // value (null/undefined = no bid), and during the between-rounds 'waiting' status the
   // completed round's entry in all_round_bids tells us whether they bid that round.
-  const myBidPlaced = (roundData as any)?.my_bid_placed !== undefined
+  // ★ locallyBidRound short-circuits the server signal so the moment this donor
+  // submits, their bid counts as placed for the round they are currently in.
+  const myBidPlaced = locallyBidRound === currentRound
+    ? true
+    : (roundData as any)?.my_bid_placed !== undefined
     ? !!(roundData as any).my_bid_placed
     : isWaitingStatus
       ? !!completedRoundBid
@@ -991,6 +1007,26 @@ const confirmQuit = async () => {
   // plus live min bid for current open round (handled in calcCumulative on backend)
   const displayCumulative = myCumulative;
 
+  // priorRoundsCumulative: what this donor has already committed across CLOSED rounds
+  // only — strip out the current open round's own live-bid preview that
+  // calcCumulative() folds into my_cumulative on the backend, so we don't double-count
+  // it against the bid the donor is actively typing below. totalIfFullyMatched is what
+  // they'd owe if THIS bid becomes the group's matched amount: prior commitment + current
+  // bid. Shown on the bid-entry/confirm-bid screens (Round 2 onwards — it's naturally
+  // £0 on Round 1, since there are no prior closed rounds yet).
+  const priorRoundsCumulative = Math.max(0, myCumulative - (roundData?.my_bid ?? 0));
+  const totalIfFullyMatched   = priorRoundsCumulative + bidAmount;
+  const committedBanner = priorRoundsCumulative > 0 ? (
+    <div className="bf-card" style={{ background:'#EAF6F5', border:'1px solid #2BA7A0', borderRadius:16, padding:'14px 16px', margin:'0 0 16px' }}>
+      <p style={{ margin:0, fontSize:13, color:'#16837E', fontWeight:600 }}>
+        You've committed £{fmtAmount(priorRoundsCumulative)} so far across previous rounds.
+      </p>
+      <p style={{ margin:'4px 0 0', fontSize:13, color:'#16837E' }}>
+        If this bid is fully matched, you'll pay <strong>£{fmtAmount(totalIfFullyMatched)}</strong> in total.
+      </p>
+    </div>
+  ) : null;
+
   // Payment total: sum per-donor matched amounts from rounds_detail (each donor gets their own)
   const paymentTotal = paymentData?.rounds_detail?.reduce((s: number, r: any) => s + (r.matched ?? 0), 0)
     ?? paymentData?.total_amount
@@ -1003,6 +1039,20 @@ const confirmQuit = async () => {
     : (paymentData?.event_images ?? []).map((p: string) =>
         p.startsWith('http') ? p : `${base}/storage/${p}`
       );
+
+  // 10. £0 pledge → skip the payment-intro screen entirely. If the host closed the
+  // event before this donor ever placed a winning bid, paymentTotal comes back as 0
+  // and there is nothing to pay — showing "Make Your Payment" / "Mark as Paid Offline"
+  // for £0 is confusing. Wait for paymentData to actually load (don't act on a still-
+  // null summary, which would also read as 0) before deciding, then go straight to the
+  // receipt/thank-you screen with no buttons and £0 shown, same as any other receipt.
+  useEffect(() => {
+    if (screen !== 'payment-intro') { zeroPledgeHandledRef.current = false; return; }
+    if (!paymentData) return;
+    if (paymentTotal > 0 || zeroPledgeHandledRef.current) return;
+    zeroPledgeHandledRef.current = true;
+    handleMarkPaid();
+  }, [screen, paymentData, paymentTotal]);
 
   /* ══════ GUARD ══════ */
   if (!stateEventId) return (
@@ -1173,6 +1223,7 @@ const confirmQuit = async () => {
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
       <div className="bf-s2">
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
+        {committedBanner}
         <div className="bf-amount-zone">
           <p className="bf-amount-hint">Type your bid</p>
           <div className="bf-amount-display">
@@ -1226,7 +1277,8 @@ const confirmQuit = async () => {
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
-        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} myBid={myBid} groupSizeKnown={groupSizeKnown} />
+        <GroupCard myGroup={myGroup} groupSize={groupSize} roundBids={roundBids} myBid={myBid} groupSizeKnown={groupSizeKnown} myBidPlaced={myBidPlaced} />
+        {committedBanner}
         <div className="bf-adj-section">
           <p className="bf-adj-label">Your bid</p>
           <div className="bf-adj-row">
@@ -1265,7 +1317,7 @@ const confirmQuit = async () => {
             ))}
           </div>
         </div>
-        <p className="bf-update-note">You can update your bid anytime<br/>until another user places theirs.</p>
+        <p className="bf-update-note">You can update your bid anytime<br/>until the round ends.</p>
         {submitError && <p style={{ color:'#E87040', fontSize:13, textAlign:'center', marginBottom:8 }}>{submitError}</p>}
         <div className="bf-cta-wrap bf-cta-wrap--bottom">
           {roundSecsLeft !== null && roundSecsLeft <= 0 ? (
@@ -1313,7 +1365,7 @@ const confirmQuit = async () => {
         <div className="bf-matched-wrap">
           {myBidPlaced ? (
             <>
-              <p className="bf-matched-label">Matched Amount (Per Donor)</p>
+              <p className="bf-matched-label">Matched Amount (This Round)</p>
               <p className="bf-matched-val">£{fmtAmount(matchedAmount)}</p>
             </>
           ) : (
@@ -1335,11 +1387,11 @@ const confirmQuit = async () => {
           </div>
           <div className="bf-stat3">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M6.6243 10.3333C6.56478 10.1026 6.44453 9.89203 6.27605 9.72355C6.10757 9.55507 5.89702 9.43481 5.6663 9.3753L1.5763 8.32063C1.50652 8.30082 1.44511 8.2588 1.40138 8.20093C1.35765 8.14306 1.33398 8.0725 1.33398 7.99996C1.33398 7.92743 1.35765 7.85687 1.40138 7.799C1.44511 7.74113 1.50652 7.6991 1.5763 7.6793L5.6663 6.62396C5.89693 6.5645 6.10743 6.44435 6.2759 6.27599C6.44438 6.10763 6.56468 5.89722 6.6243 5.66663L7.67897 1.57663C7.69857 1.50657 7.74056 1.44486 7.79851 1.40089C7.85647 1.35693 7.92722 1.33313 7.99997 1.33313C8.07271 1.33313 8.14346 1.35693 8.20142 1.40089C8.25938 1.44486 8.30136 1.50657 8.32097 1.57663L9.37497 5.66663C9.43449 5.89734 9.55474 6.10789 9.72322 6.27637C9.8917 6.44486 10.1023 6.56511 10.333 6.62463L14.423 7.67863C14.4933 7.69803 14.5553 7.73997 14.5995 7.79801C14.6437 7.85606 14.6677 7.927 14.6677 7.99996C14.6677 8.07292 14.6437 8.14387 14.5995 8.20191C14.5553 8.25996 14.4933 8.3019 14.423 8.3213L10.333 9.3753C10.1023 9.43481 9.8917 9.55507 9.72322 9.72355C9.55474 9.89203 9.43449 10.1026 9.37497 10.3333L8.3203 14.4233C8.3007 14.4934 8.25871 14.5551 8.20075 14.599C8.1428 14.643 8.07205 14.6668 7.9993 14.6668C7.92656 14.6668 7.85581 14.643 7.79785 14.599C7.73989 14.5551 7.69791 14.4934 7.6783 14.4233L6.6243 10.3333Z" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M13.333 2V4.66667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M14.6667 3.33337H12" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M2.66699 11.3334V12.6667" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33333 12H2" stroke="#2BA7A0" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            <span className="bf-stat3-val">£{fmtAmount(groupTotal)}</span><span className="bf-stat3-lbl">Group Total</span>
+            <span className="bf-stat3-val">£{fmtAmount(groupTotal)}</span><span className="bf-stat3-lbl">Group Total(This Round)</span>
           </div>
         </div>
         <div className="bf-card bf-tealbg">
-          <p className="bf-card-title">Your Contribution</p>
+          <p className="bf-card-title">Your Contribution(This Round)</p>
           {myBidPlaced ? (
             <>
               <div className="bf-card-row"><span className="bf-card-lbl">Your Bid</span><span className="bf-card-val">£{fmtAmount(myBid)}</span></div>
@@ -1356,7 +1408,7 @@ const confirmQuit = async () => {
           )}
         </div>
         <div className="bf-card bf-group-bids-card">
-          <span className="bf-card-title" style={{ margin: 0, display: 'block' }}>Group Bids</span>
+          <span className="bf-card-title" style={{ margin: '6px 0 6px 14px', display: 'block' }}>Group Bids</span>
           {(() => {
             // myGroup.members is the authoritative scoped membership for this donor's group.
             // round_bids from the API can contain ALL round participants (unscoped), so we
@@ -1387,7 +1439,10 @@ const confirmQuit = async () => {
             return (
               <div className="bf-group-bids-list">
                 {bidsToShow.map((b: any, i: number) => {
-                  const noBidsYet = minAmt < 0;
+                  // ★ Same colour gate as GroupCard: colours only once this donor has
+                  // placed a bid this round, and only when the group has >1 donor.
+                  const colorEnabled = myBidPlaced && bidsToShow.length > 1;
+                  const noBidsYet = minAmt < 0 || !colorEnabled;
                   const isRed = !noBidsYet && (b.amount <= 0 || b.amount === minAmt);
                   const avatarStyle: React.CSSProperties = noBidsYet
                       ? {}
@@ -1414,7 +1469,7 @@ const confirmQuit = async () => {
         <div className="bf-card bf-card--row bf-card--cumul">
           <div>
             <p className="bf-card-title bf-card-title--sm">Total matched amount</p>
-            <p className="bf-card-lbl" style={{ marginTop: 2 }}>Across all rounds · not your payment</p>
+            <p className="bf-card-lbl" style={{ marginTop: 2 }}>Across all rounds amount due</p>
           </div>
           <span className="bf-cumul-val">£{fmtAmount(displayCumulative)}</span>
         </div>
@@ -1439,7 +1494,7 @@ const confirmQuit = async () => {
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             background: '#F5F6F8', borderRadius: 65, padding: '14px 24px', margin: '16px 0 8px',
-            color: '#9AA0A6', fontSize: 14, fontWeight: 500,
+            color: '#6c6565', fontSize: 14, fontWeight: 500,
           }}>
             <span>Round {currentRound + 1}</span>
             {hostPaused ? (
@@ -1696,7 +1751,7 @@ const confirmQuit = async () => {
           </div>
           <p className="bf-difference-desc">Through peer matching, your £{paymentTotal} donation helped raise funds for {paymentData?.charity_name ?? 'the charity'}.</p>
         </div>
-        <button className="bf-teal-btn bf-teal-btn--full" onClick={goBack}>Back to lobby</button>
+        <button className="bf-teal-btn bf-teal-btn--full" onClick={() => router.push('/devents', 'root', 'replace')}>Back to lobby</button>
         <div style={{ height: 48 }} />
       </div>
     </IonContent></IonPage>
@@ -1734,7 +1789,7 @@ const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: st
 
 const AVATAR_PAGE = 4;
 
-const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number; groupSizeKnown?: boolean }> = ({ myGroup, groupSize, roundBids = [], myBid = 0, groupSizeKnown = true }) => {
+const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; groupSize: number; roundBids?: any[]; myBid?: number; groupSizeKnown?: boolean; myBidPlaced?: boolean }> = ({ myGroup, groupSize, roundBids = [], myBid = 0, groupSizeKnown = true, myBidPlaced = false }) => {
   // Prefer myGroup.members (scoped to THIS donor's group) once a group has been assigned.
   // round_bids is UNSCOPED — it holds every donor's bid across every group in the round, so
   // using it after grouping shows other groups' donors inside this group's card (e.g. Group A's
@@ -1779,31 +1834,28 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
     return Number(match?.amount ?? m.amount ?? m.bid_amount ?? 0) || 0;
   };
 
-  // Rank colour for the logged-in user's own cell.
-  // Comparison pool must include EVERY available signal: the submitted round_bids,
-  // the displayed members' amounts, AND the logged-in user's own in-progress bid.
-  // round_bids alone omits the user's bid until they hit "Submitted", which mis-ranked
-  // "You" — a lowest bid showed amber instead of red, and a highest bid showed no colour.
-  // Including amountOf({ is_you: true }) (falls back to the live myBid) fixes both.
-  // Exact fills sampled from the Figma "You" cell: green #27A99F, amber #FCB13E, red #F6494D.
-  const rankPool = [
-    ...roundBids.map((b: any) => Number(b.amount) || 0),
-    ...members.map(amountOf),
-    amountOf({ is_you: true }),
-  ].filter((a: number) => a > 0);
-  const maxAmt = rankPool.length ? Math.max(...rankPool) : -1;
-  const minAmt = rankPool.length ? Math.min(...rankPool) : -1;
+  // Rank colour for every member's cell, compared within this donor's own group.
+  // ★ Colour gate: every box stays WHITE (neutral hairline border, no fill) until
+  // EVERY member of the group has placed a bid this round — not just the logged-in
+  // donor. bid_status comes straight from the backend (buildMyGroup / buildPredictedGroup:
+  // 'submitted' | 'bidding'), so this reflects the whole group's state, not just "you".
+  // A solo donor (group of 1) has nobody to be ranked against, so colour stays off too.
+  // Once every member has bid, three tiers apply (compared on raw bid amounts, £0
+  // included — this is a visual ranking of what everyone actually bid, unlike the
+  // server's matched-amount floor which excludes zero bids from the minimum):
+  //   red    = the UNIQUE lowest bid
+  //   orange = a TIED lowest bid (2+ donors share the lowest amount)
+  //   green  = everyone else
+  const allBidsPlaced = members.length > 1 && members.every((m: any) => m?.bid_status === 'submitted');
+  const rankAmounts = members.map(amountOf);
+  const minAmt = rankAmounts.length ? Math.min(...rankAmounts) : -1;
+  const minCount = rankAmounts.filter((a: number) => a === minAmt).length;
+  const colorEnabled = allBidsPlaced;
   const youRankColor = (m: any): string | null => {
+    if (!colorEnabled) return null;       // not everyone has bid yet, or solo donor → white
     const amt = amountOf(m);
-    // Binary colour rule, compared only within the donor's own group:
-    //   red   = the lowest bid (all tied lowest bidders are red)
-    //   green = everyone else
-    //   none  = a donor who has not bid yet in this round
-    // The middle 'amber' tier has been removed. minAmt is the lowest NON-ZERO bid,
-    // because rankPool filters out zeros — matching the server's matched-amount rule.
-    if (maxAmt < 0) return null;          // nobody has bid yet → no colour
-    if (amt <= 0) return null;            // this donor has not bid yet → no colour
-    return amt === minAmt ? '#F6494D' : '#27A99F';
+    if (amt !== minAmt) return '#27A99F'; // green — everyone else
+    return minCount > 1 ? '#FCB13E' : '#F6494D'; // orange — tied lowest, red — unique lowest
   };
 
   // Group panel is always plain white. The rank colour now lives on the individual
@@ -1904,7 +1956,7 @@ const GroupCard: React.FC<{ myGroup: { name: string; members: any[] } | null; gr
           pagination={{ clickable: true }}
           spaceBetween={8}
           slidesPerView={perView}
-          style={{ width: '100%', paddingBottom: 16 }}
+          style={{ width: '100%', paddingBottom: 28, ['--swiper-pagination-bottom' as any]: '4px' }}
         >
           {slots.map((m, i) => (
             <SwiperSlide key={i}>{renderAvatarCol(m, i)}</SwiperSlide>

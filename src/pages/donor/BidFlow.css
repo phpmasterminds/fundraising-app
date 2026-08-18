@@ -889,7 +889,7 @@
     
     .bf-card-lbl {
         font-size: 12px;
-        color: #CCC;
+        color: #b1acac;
     }
     
     .bf-card-val {
@@ -946,7 +946,7 @@
         background: none;
         border: none;
         font-size: 14px;
-        color: #CCCCCC;
+        color: #6c6565;
         cursor: pointer;
         padding: 10px;
         text-align: center;

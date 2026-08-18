@@ -372,14 +372,15 @@
     transform: scale(0.97);
 }
 
+/* NOTE: background fills removed per host request — group box status is now
+   signalled by the border colour only + the per-donor dots, not a background
+   tint. */
 .ve-group-card.teal-border {
     border-color: #2BA7A0;
-    background: #F5FAFA;
 }
 
 .ve-group-card.orange-border {
     border-color: #F4A43A;
-    background: #FFFBF5;
 }
 
 .ve-group-header {
@@ -476,7 +477,7 @@
 
 .ve-end-btn {
     font-size: 14px;
-    color: #CCCCCC;
+    color: #6c6565;
     cursor: pointer;
     margin-top: 10px;
 }
@@ -1564,6 +1565,7 @@
 }
 
 .ve-pga-move-avatar { font-size: 30px; width:50px; }
+
 
 /* Group destination rows */
 .ve-pga-move-group-list {

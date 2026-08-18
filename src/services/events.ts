@@ -307,6 +307,30 @@ export const createGroup = async (
   return res.data;
 };
 
+// ── Waiting room (donors who viewed but haven't joined) ───────────
+
+export interface WaitingRoomDonor {
+  user_id:    number;
+  name:       string;
+  initial:    string;
+  photo_url:  string | null;
+  viewed_at:  string | null;
+}
+
+/**
+ * GET /host/events/:id/waiting-room
+ *
+ * Donors who have opened the event detail page (donor EventController::show
+ * logs the view) but are not yet on the roster (haven't joined). Shown to the
+ * host on the Launch Event screen, before the first round starts.
+ */
+export async function getWaitingRoom(
+  eventId: number,
+): Promise<{ count: number; donors: WaitingRoomDonor[] }> {
+  const { data } = await api.get(`/host/events/${eventId}/waiting-room`);
+  return data;
+}
+
 // ── Host notifications ────────────────────────────────────────────
 
 export interface HostNotification {

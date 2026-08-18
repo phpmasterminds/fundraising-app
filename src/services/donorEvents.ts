@@ -186,6 +186,7 @@ export async function getPaymentSummary(eventId: number): Promise<PaymentSummary
 
 /** POST /donor/events/:id/payment/mark-paid */
 export async function markPaid(eventId: number): Promise<{ success: boolean }> {
+	console.log('came');
   const { data } = await api.post(`/donor/events/${eventId}/payment/mark-paid`);
   return data;
 }

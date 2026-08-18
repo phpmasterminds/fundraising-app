@@ -26,8 +26,9 @@ import {
   getUnreadDonorMessageIds,
   pauseTimer,
   resumeTimer,
+  getWaitingRoom,
 } from '../../services/events';
-import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage } from '../../services/events';
+import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage, WaitingRoomDonor } from '../../services/events';
 import { copyOutline, checkmarkOutline } from 'ionicons/icons';
 
 const imgBase = import.meta.env.VITE_ASSETS_URL;
@@ -159,7 +160,7 @@ const AvatarContent: React.FC<{ photoUrl: string | null | undefined; initial: st
 // Host Summary sheet payload (see EventController::show → 'summary').
 interface SummaryGroup { name: string; min_bid: number | null; max_bid: number | null; group_total: number; donors?: ApiHistoryDonor[]; }
 interface SummaryRound { round_number: number; status: string; groups: SummaryGroup[]; }
-interface SummaryDonor { pseudonym: string; initial: string; owed: number; payment_status: 'paid' | 'unpaid'; paid_at: string | null; photo_url?: string | null; }
+interface SummaryDonor { pseudonym: string; initial: string; owed: number; payment_status: 'paid' | 'unpaid'; paid_at: string | null; photo_url?: string | null; email?: string | null; }
 interface EventSummary { rounds: SummaryRound[]; donors: SummaryDonor[]; }
 
 // Fallback emoji pool when emoji is not stored on GroupMember
@@ -182,6 +183,12 @@ const ViewEvent: React.FC = () => {
   const [actionLoading, setActionLoading]         = useState(false);
   const [showCallTimeConfirm, setShowCallTimeConfirm] = useState(false); // Call Time end-round confirmation
   const [showEndEventConfirm, setShowEndEventConfirm] = useState(false); // End Event confirmation
+  const [showLaunchEventConfirm, setShowLaunchEventConfirm] = useState(false); // ★ now doubles as the Waiting Room sheet — opens on "Launch Event" tap, shows viewers, and holds the Launch Event action
+  const [showLaunchRoundConfirm, setShowLaunchRoundConfirm] = useState(false); // Launch Round confirmation
+  // ★ NEW: Waiting Room — donors who viewed the event before joining, shown
+  // inside the Launch Event sheet above.
+  const [waitingRoomDonors, setWaitingRoomDonors]   = useState<WaitingRoomDonor[]>([]);
+  const [waitingRoomLoading, setWaitingRoomLoading] = useState(false);
 
   // ─── Config edit state ────────────────────────────────────────────────────
   const [editName, setEditName]                   = useState('');
@@ -226,6 +233,15 @@ const ViewEvent: React.FC = () => {
   // whatever this component last set locally.
   const [pgaPaused, setPgaPaused]       = useState(false);
   const [pgaPauseLoading, setPgaPauseLoading] = useState(false);
+  // Double-tap protection for the pause/resume toggle. `pgaPauseLoading` alone
+  // is not enough: a fast second tap can be dispatched against the same render
+  // (stale closure -> guard reads false), or land right after the first request
+  // resolves, which flips pause straight back to resume. The ref is synchronous
+  // so it blocks in-flight taps, and the cooldown swallows the trailing tap of
+  // a double-click once the request has already settled.
+  const pgaPauseBusyRef                 = useRef(false);
+  const pgaPauseLastRef                 = useRef(0);
+  const PGA_PAUSE_COOLDOWN_MS           = 700;
   const [pgaCreateLoading, setPgaCreateLoading] = useState(false);
   const moveSheetRef                    = useRef<HTMLDivElement>(null);
 
@@ -480,6 +496,30 @@ const ViewEvent: React.FC = () => {
     return `${m}:${s}`;
   };
 
+  // ★ NEW: Waiting Room — fetch donors who viewed the event but haven't
+  // joined yet. Called when the Launch Event sheet opens.
+  const loadWaitingRoom = async () => {
+    if (!eventId) return;
+    setWaitingRoomLoading(true);
+    try {
+      const res = await getWaitingRoom(Number(eventId));
+      setWaitingRoomDonors(res.donors);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setWaitingRoomLoading(false);
+    }
+  };
+
+  // ★ NEW: while the Waiting Room sheet is open, refresh it every 5s so
+  // newly-arrived viewers show up without the host having to close/reopen.
+  useEffect(() => {
+    if (!showLaunchEventConfirm) return;
+    const id = setInterval(() => { loadWaitingRoom(); }, 5000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLaunchEventConfirm, eventId]);
+
   // ─── Host action handlers ─────────────────────────────────────────────────
   const handleStartEvent = async () => {
     if (!eventId || actionLoading) return;
@@ -615,7 +655,7 @@ const handleEndEvent = async () => {
 
   // Host Summary sheet data (round-wise group min/max/total + per-donor settlement).
   const summaryData    = (apiEvent as unknown as { summary?: EventSummary } | null)?.summary;
-  const summaryOwing   = summaryData ? summaryData.donors.filter((d) => d.owed > 0) : [];
+  const summaryOwing   = summaryData ? summaryData.donors.filter((d) => d.owed >= 0) : [];
   const summaryPaidCnt = summaryOwing.filter((d) => d.payment_status === 'paid').length;
 
   const totalRaised     = apiEvent?.total_raised ?? 0;
@@ -789,6 +829,9 @@ const handleEndEvent = async () => {
   // Host taps pause: stops the donor-facing waiting countdown immediately.
   const pgaPauseTimer = async () => {
     if (!eventId || pgaPauseLoading) return;
+    if (pgaPauseBusyRef.current) return;
+    if (Date.now() - pgaPauseLastRef.current < PGA_PAUSE_COOLDOWN_MS) return;
+    pgaPauseBusyRef.current = true;
     setPgaPauseLoading(true);
     try {
       await pauseTimer(Number(eventId));
@@ -797,6 +840,8 @@ const handleEndEvent = async () => {
       setPgaToast('Could not pause — please try again.');
       setTimeout(() => setPgaToast(null), 2500);
     } finally {
+      pgaPauseLastRef.current = Date.now();
+      pgaPauseBusyRef.current = false;
       setPgaPauseLoading(false);
     }
   };
@@ -805,12 +850,19 @@ const handleEndEvent = async () => {
   // donor countdown picks back up, shifted forward by however long it was paused.
   const pgaResumeTimer = async () => {
     if (!eventId || !pgaPaused) return;
+    if (pgaPauseBusyRef.current) return;
+    if (Date.now() - pgaPauseLastRef.current < PGA_PAUSE_COOLDOWN_MS) return;
+    pgaPauseBusyRef.current = true;
+    setPgaPauseLoading(true);
     try {
       await resumeTimer(Number(eventId));
     } catch (e) {
       // Non-fatal — the cron/next poll will still respect the stale pause
       // flag safely; surfacing a toast here would just be noise on sheet-close.
     } finally {
+      pgaPauseLastRef.current = Date.now();
+      pgaPauseBusyRef.current = false;
+      setPgaPauseLoading(false);
       setPgaPaused(false);
     }
   };
@@ -1339,9 +1391,65 @@ const handleEndEvent = async () => {
   const getGroupRankStyle = (g: Group): React.CSSProperties => {
     const total = groupTotal(g);
     if (total <= 0 || maxGroupTotal === minGroupTotal) return {};
-    if (total === maxGroupTotal) return { background: '#F1FAF3', borderColor: '#4CAF50' };
-    if (total === minGroupTotal) return { background: '#FEF5F5', borderColor: '#EF5350' };
-    return { background: '#FFFBF5', borderColor: '#FFA726' };
+    // NOTE: background fill removed per host request — bid-rank signal now lives
+    // entirely in the per-donor dots (renderGroupDots below); the card border
+    // colour is left as a secondary, subtler echo of the same ranking.
+    if (total === maxGroupTotal) return { borderColor: '#4CAF50' };
+    if (total === minGroupTotal) return { borderColor: '#EF5350' };
+    return { borderColor: '#FFA726' };
+  };
+
+  // ── Per-donor bid-status dots (Round groups grid) ──
+  // Host request: stop tinting the whole group card background; instead colour
+  // each individual dot to show that specific donor's status:
+  //   • not bid yet                        → white (hollow) dot
+  //   • bid placed, group still bidding     → teal  (existing "has bid" colour)
+  //   • once EVERY donor in the group has bid:
+  //       - that donor's bid is the unique lowest      → red
+  //       - that donor's bid ties the lowest w/ others → orange
+  //       - everyone else                               → green
+  const DOT_WHITE  = '#FFFFFF';
+  const DOT_TEAL   = '#2BA7A0';
+  const DOT_RED    = '#F54A4D';
+  const DOT_ORANGE = '#FCB040';
+  const DOT_GREEN  = '#4CAF50';
+
+  const renderGroupDots = (group: Group) => {
+    const donors = group.donors.slice(0, MAX_DOTS);
+    const allBidsIn = group.totalBids > 0 && group.bids === group.totalBids;
+
+    // Only needed once every donor has bid — find the lowest bid amount and
+    // how many donors share it, to distinguish a unique low from a tied low.
+    let minAmount = Infinity;
+    let minCount = 0;
+    if (allBidsIn) {
+      const amounts = group.donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+      if (amounts.length) {
+        minAmount = Math.min(...amounts);
+        minCount = amounts.filter(a => a === minAmount).length;
+      }
+    }
+
+    return donors.map((d, i) => {
+      const hasBid = d.bid != null && parseAmount(d.bid) > 0;
+      let color = DOT_WHITE;
+      if (hasBid) {
+        if (!allBidsIn) {
+          color = DOT_TEAL;
+        } else {
+          const amt = parseAmount(d.bid);
+          if (amt === minAmount) color = minCount > 1 ? DOT_ORANGE : DOT_RED;
+          else color = DOT_GREEN;
+        }
+      }
+      return (
+        <div
+          key={d.groupMemberId ?? i}
+          className="ve-dot"
+          style={{ background: color, border: hasBid ? 'none' : '1px solid #D8DCE1' }}
+        />
+      );
+    });
   };
 
   // Rank donors inside a group by their bid. Only bids > 0 are ranked.
@@ -1684,7 +1792,7 @@ const handleCopy = async (text: string, field: string) => {
                         <span className="ve-group-name">{group.name}</span>
                         {getStatusIcon(group.status)}
                       </div>
-                      <div className="ve-bid-dots" style={{ flexWrap: 'wrap', minWidth: 0, overflow: 'hidden' }}>{renderDots(group.bids, group.totalBids, group.status)}</div>
+                      <div className="ve-bid-dots" style={{ flexWrap: 'wrap', minWidth: 0, overflow: 'hidden' }}>{renderGroupDots(group)}</div>
                       <div className="ve-group-bids">{group.bids}/{group.totalBids} bids</div>
                       {group.min && <div className="ve-group-min">Min: {group.min}</div>}
                       {group.alert && (
@@ -1717,7 +1825,7 @@ const handleCopy = async (text: string, field: string) => {
         <div className="ve-bottom-area">
 
           {apiEvent?.status === 'draft' && (
-            <div className="ve-launch-btn" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={handleStartEvent}>
+            <div className="ve-launch-btn" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) { setShowLaunchEventConfirm(true); loadWaitingRoom(); } }}>
               {actionLoading ? 'Launching…' : '🚀 Launch Event'}
             </div>
           )}
@@ -1730,7 +1838,7 @@ const handleCopy = async (text: string, field: string) => {
           )}
 
           {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && !roundJustClosed && (
-            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={handleStartRound}>
+            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(true); }}>
               {actionLoading ? 'Starting…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
             </div>
           )}
@@ -1752,6 +1860,96 @@ const handleCopy = async (text: string, field: string) => {
             <div className="ve-launch-btn" style={{ background: '#9AA0A6', boxShadow: 'none', cursor: 'default' }}>Event Finished</div>
           )}
         </div>
+
+        {/* ══ Waiting Room (was: Launch Event Confirmation) ══
+            ★ NEW: instead of a plain "Launch this event?" confirmation, this
+            sheet now shows donors who have viewed the event but haven't
+            joined yet (App\Models\EventView, logged in donor
+            EventController::show, surfaced via GET .../waiting-room). The
+            Launch Event action lives at the bottom, same as before. */}
+        {showLaunchEventConfirm && (
+          <>
+            <div className="ve-backdrop" onClick={() => { if (!actionLoading) setShowLaunchEventConfirm(false); }} />
+            <div className="ve-sheet">
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">Waiting Room{waitingRoomDonors.length > 0 ? ` (${waitingRoomDonors.length})` : ''}</h3>
+              </div>
+              <p style={{ margin: '4px 24px 14px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                Donors who've viewed this event before joining.
+              </p>
+
+              <div className="ve-donor-list" style={{ maxHeight: '42vh', overflowY: 'auto', padding: '0 20px' }}>
+                {waitingRoomLoading && waitingRoomDonors.length === 0 ? (
+                  <div className="ve-no-groups">Loading…</div>
+                ) : waitingRoomDonors.length === 0 ? (
+                  <div className="ve-no-groups">No one has viewed this event yet</div>
+                ) : (
+                  waitingRoomDonors.map((donor, i) => (
+                    <div key={donor.user_id} className="ve-donor-row">
+                      <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>
+                        {<AvatarContent photoUrl={donor.photo_url} initial={donor.initial} />}
+                      </div>
+                      <div className="ve-donor-info">
+                        <span className="ve-donor-name">{donor.name}</span>
+                        {donor.viewed_at && <span className="ve-donor-sub">Viewed {donor.viewed_at}</span>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <p style={{ margin: '14px 24px 4px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                This opens the event for donors to join and start bidding.
+              </p>
+              <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!actionLoading) setShowLaunchEventConfirm(false); }}>Cancel</div>
+                <div
+                  className="ve-call-time-btn"
+                  style={{ flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                  onClick={async () => { if (actionLoading) return; await handleStartEvent(); setShowLaunchEventConfirm(false); }}
+                >
+                  {actionLoading ? 'Launching…' : '🚀 Launch Event'}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ══ Launch Round Confirmation ══
+            NOTE: rendered via createPortal straight to document.body with an
+            explicit high z-index. Previously this sheet was mounted inline
+            here (before the PGA sheet's JSX further down in this file). The
+            PGA "Launch Round →" button ALSO sets showLaunchRoundConfirm(true),
+            but the PGA sheet shares the same .ve-backdrop/.ve-sheet classes
+            and is rendered LATER in the DOM, so it painted on top and hid
+            this confirmation completely -> clicking the button looked like
+            it "did nothing". The portal + z-index guarantees this modal is
+            always the top-most layer, no matter what else is open. */}
+        {showLaunchRoundConfirm && createPortal((
+          <div style={{ position: 'fixed', inset: 0, zIndex: 20000 }}>
+            <div className="ve-backdrop" style={{ zIndex: 20000 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(false); }} />
+            <div className="ve-sheet" style={{ zIndex: 20001 }}>
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">Launch Round {(apiEvent?.completed_rounds ?? 0) + 1}?</h3>
+              </div>
+              <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                This opens the next round for bidding immediately.
+              </p>
+              <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(false); }}>Cancel</div>
+                <div
+                  className="ve-call-time-btn"
+                  style={{ flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                  onClick={async () => { if (actionLoading) return; await (showPGA ? pgaLaunchNextRound() : handleStartRound()); setShowLaunchRoundConfirm(false); }}
+                >
+                  {actionLoading ? 'Launching…' : 'Yes'}
+                </div>
+              </div>
+            </div>
+          </div>
+        ), document.body)}
 
         {/* ══ Call Time Confirmation ══ */}
         {showCallTimeConfirm && (
@@ -2204,6 +2402,7 @@ const handleCopy = async (text: string, field: string) => {
                     <div className="ve-donor-avatar" style={{ background: COLORS[di % COLORS.length], flexShrink: 0 }}>{<AvatarContent photoUrl={d.photo_url} initial={d.initial} />}</div>
                     <div className="ve-donor-info" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, textAlign: 'left' }}>
                       <span className="ve-donor-name">{d.pseudonym}</span>
+                      {d.email && <span className="ve-donor-email">{d.email}</span>}
                       <span className="ve-donor-sub">{d.owed > 0 ? `Owes £${d.owed}` : 'No payment due'}</span>
                     </div>
                     <div className="ve-all-donor-amounts" style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, marginLeft: 'auto' }}>
@@ -2331,7 +2530,7 @@ const handleCopy = async (text: string, field: string) => {
                     Group size options
                   </div>
                   <div className="ve-pga-summary-bar" style={{ flexWrap: 'wrap', gap: 8, rowGap: 8, padding: 0 }}>
-                    {groupSizeOptions.map(opt => (
+					  {/*{groupSizeOptions.map(opt => (
                       <button
                         key={opt.size}
                         className="ve-pga-rebalance-btn"
@@ -2348,7 +2547,7 @@ const handleCopy = async (text: string, field: string) => {
                         <span>{opt.size}{opt.recommended ? ' · Recommended' : ''}</span>
                         <span style={{ fontSize: 11, fontWeight: 400 }}>{describeChunks(opt.chunks)}</span>
                       </button>
-                    ))}
+					  ))}*/}
                     <input
                       className="ve-config-input"
                       type="number"
@@ -2513,7 +2712,7 @@ const handleCopy = async (text: string, field: string) => {
                       : `Waiting: ${formatTimer(waitingSecs)} — ${pgaPauseLoading ? '…' : 'Tap to Pause'}`}
                   </div>
                 )}
-                <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={pgaLaunchNextRound}>
+                <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(true); }}>
                   {actionLoading ? 'Launching…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
                 </div>
                 <div className="ve-end-btn" onClick={() => setShowPGA(false)}>End Event</div>

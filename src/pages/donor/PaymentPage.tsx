@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { IonPage, IonContent } from '@ionic/react';
 import { useParams, useHistory } from 'react-router-dom';
 import { Browser } from '@capacitor/browser';
@@ -24,6 +24,7 @@ const PaymentPage: React.FC = () => {
   const [paid, setPaid] = useState(false);
   const [paidAt, setPaidAt] = useState<string>('');
   const [expandedRound, setExpandedRound] = useState<number | null>(null);
+  const zeroPledgeHandledRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -71,6 +72,18 @@ const PaymentPage: React.FC = () => {
 
   const alreadyPaid = summary?.payment_status === 'paid';
   const charityName = (summary as any)?.charity_name ?? '—';
+
+  // £0 pledge (event closed before this donor placed a winning bid) — nothing is owed,
+  // so don't make them tap "Mark as Paid Offline" just to clear the PaymentGate lock.
+  // Wait for summary to actually load (not still null/loading) before deciding.
+  useEffect(() => {
+    if (loading || !summary) return;
+    if (alreadyPaid || paid || marking) return;
+    if (zeroPledgeHandledRef.current) return;
+    if (Number(summary.total_amount) > 0) return;
+    zeroPledgeHandledRef.current = true;
+    confirmPaid();
+  }, [loading, summary, alreadyPaid, paid, marking]);
 
   return (
     <IonPage>
