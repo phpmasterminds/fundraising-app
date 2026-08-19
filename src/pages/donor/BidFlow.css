@@ -589,7 +589,7 @@
     
     .bf-adj-label {
         font-size: 14px;
-        color: #CCCCCC;
+        color: #6c6565;
         margin: 0;
         font-weight: 400;
     }
@@ -793,7 +793,7 @@
     
     .bf-matched-label {
         font-size: 14px;
-        color: #CCC;
+        color: #6c6565;
         margin: 0 0 4px;
         font-weight: 400;
     }
@@ -889,7 +889,7 @@
     
     .bf-card-lbl {
         font-size: 12px;
-        color: #b1acac;
+        color: #6c6565;
     }
     
     .bf-card-val {

@@ -97,7 +97,7 @@
 
 .ve-event-org {
     font-size: 14px;
-    color: #CCCCCC;
+    color: #6c6565;
     margin: 0;
 }
 
@@ -133,7 +133,7 @@
 
 .ve-control-icon {
     font-size: 15px;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-control-label {
@@ -227,7 +227,7 @@
 
 .ve-stat-label {
     font-size: 12px;
-    color: #CCC;
+    color: #6c6565;
     margin: 0;
 }
 
@@ -250,7 +250,7 @@
 
 .ve-progress-label {
     font-size: 14px;
-    color: #CCC;
+    color: #6c6565;
 }
 
 .ve-progress-amount {
@@ -278,7 +278,7 @@
     display: flex;
     justify-content: space-between;
     font-size: 12px;
-    color: #CCC;
+    color: #6c6565;
 }
 
 
@@ -419,7 +419,7 @@
 
 .ve-group-bids {
     font-size: 12px;
-    color: #CCCCCC;
+    color: #6c6565;
     margin-bottom: 4px;
 }
 
@@ -610,7 +610,7 @@
 
 .badge-waiting {
     background: #EEF1F4;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-sheet-close {
@@ -701,7 +701,7 @@
 
 .ve-config-label {
     font-size: 12px;
-    color: #9AA0A6;
+    color: #6c6565;
     display: block;
     margin-bottom: 6px;
 }
@@ -772,7 +772,7 @@
 
 .ve-all-donor-col-label {
     font-size: 10px;
-    color: #9AA0A6;
+    color: #6c6565;
     white-space: nowrap;
 }
 
@@ -792,7 +792,7 @@
     font-size: 11px;
     font-weight: 500;
     background: #F1F2F6;
-    color: #9AA0A6;
+    color: #6c6565;
     border-radius: 20px;
     padding: 3px 10px;
     white-space: nowrap;
@@ -853,7 +853,7 @@
 
 .ve-donor-sub {
     font-size: 12px;
-    color: #9AA0A6;
+    color: #6c6565;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -924,7 +924,7 @@
 
 .ve-ls-org {
     font-size: 13px;
-    color: #9AA0A6;
+    color: #6c6565;
     margin-bottom: 14px;
 	text-align: center;
 }
@@ -941,7 +941,7 @@
     align-items: center;
     gap: 5px;
     font-size: 13px;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-ls-section-title {
@@ -1060,7 +1060,7 @@
 
 .ve-ls-lb-sub {
     font-size: 12px;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-ls-lb-total {
@@ -1128,7 +1128,7 @@
     padding: 6px 0;
     font-size: 13px;
     font-weight: 500;
-    color: #9AA0A6;
+    color: #6c6565;
     cursor: pointer;
     text-align: center;
 }
@@ -1184,7 +1184,7 @@
 
 .ve-ro-badge--not-started {
     background: #F1F2F6;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-ro-divider {
@@ -1211,7 +1211,7 @@
 
 .ve-ro-stat-label {
     font-size: 11px;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-ro-stat-val {
@@ -1284,7 +1284,7 @@
 .ve-no-groups {
     text-align: center;
     padding: 30px 0;
-    color: #9AA0A6;
+    color: #6c6565;
     font-size: 14px;
 }
 
@@ -1652,7 +1652,7 @@
 .ve-pga-action-row--create:active { background: #CCE9E7; }
 .ve-pga-action-row--delete { color: #E53E3E; background: #FFF5F5; }
 .ve-pga-action-row--delete:active { background: #FED7D7; }
-.ve-pga-action-row--cancel { justify-content: center; color: #9AA0A6; background: transparent; margin-top: 4px; }
+.ve-pga-action-row--cancel { justify-content: center; color: #6c6565; background: transparent; margin-top: 4px; }
 .ve-pga-action-row:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Move sheet full badge ───────────────────────────────────────────────── */
@@ -1672,7 +1672,7 @@
 }
 .ve-pga-move-group-count {
   font-size: 13px;
-  color: #9AA0A6;
+  color: #6c6565;
   margin-left: 8px;
 }
 
@@ -1745,7 +1745,7 @@
 
 .ve-msg-head-sub {
     font-size: 11px;
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-msg-close {
@@ -1772,7 +1772,7 @@
 
 .ve-msg-empty {
     text-align: center;
-    color: #9AA0A6;
+    color: #6c6565;
     font-size: 13px;
     padding: 28px 12px;
 }
@@ -1802,7 +1802,7 @@
 }
 
 .ve-msg-bubble--donor .ve-msg-time {
-    color: #9AA0A6;
+    color: #6c6565;
 }
 
 .ve-msg-bubble-body {

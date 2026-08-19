@@ -607,10 +607,8 @@ const handleEndEvent = async () => {
 
   // ─── Map API → local types ────────────────────────────────────────────────
   const mapGroups = (apiGroups: ApiGroup[]): Group[] =>
-    apiGroups.map((g, gi) => ({
-      name: g.name, bids: g.bids, totalBids: g.total_bids,
-      min: g.min ?? undefined, alert: g.alert, status: g.status,
-      donors: g.donors.map((d, di) => ({
+    apiGroups.map((g, gi) => {
+      const donors = g.donors.map((d, di) => ({
         initial: d.initial, name: d.pseudonym, sub: d.pseudonym,
         bid: d.is_quit ? null : d.bid_amount,
         totalCommitted: d.total_committed ?? undefined,
@@ -625,8 +623,31 @@ const handleEndEvent = async () => {
         color: COLORS[(gi + di) % COLORS.length],
         groupMemberId: d.group_member_id,
         photoUrl: (d as unknown as { photo_url?: string | null }).photo_url ?? null,
-      })),
-    }));
+      }));
+      // ★ FIX (client-reported): derive the "X/Y bids" numerator/denominator
+      // (and therefore the Done/Bidding/Waiting badge AND the per-donor dot
+      // colouring in renderGroupDots, which both key off these two numbers)
+      // directly from THIS round's actual donor roster, instead of trusting
+      // the backend's separately-tracked g.bids / g.total_bids aggregate.
+      // Those aggregates were observed going stale (e.g. a group showing
+      // "2/3 bids" when it only has 2 members this round), which made the
+      // dots flip to red/green/orange before every donor had actually bid,
+      // or never flip even once everyone had. donors here is the exact same
+      // per-round roster the group-detail sheet lists below, so it's always
+      // in sync with what the host sees when they open the group.
+      const localParseAmount = (val?: string | null): number => {
+        if (!val) return 0;
+        const n = Number(String(val).replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? 0 : n;
+      };
+      const totalBidsActual = donors.length;
+      const bidsActual = donors.filter((d) => d.bid != null && localParseAmount(d.bid) > 0).length;
+      return {
+        name: g.name, bids: bidsActual, totalBids: totalBidsActual,
+        min: g.min ?? undefined, alert: g.alert, status: g.status,
+        donors,
+      };
+    });
 
   const mapRounds = (apiRounds: ApiRound[]): RoundData[] =>
     apiRounds.map((r) => ({
@@ -1454,15 +1475,29 @@ const handleEndEvent = async () => {
 
   // Rank donors inside a group by their bid. Only bids > 0 are ranked.
   const getDonorRankStyle = (donor: Donor, donors: Donor[]): React.CSSProperties => {
-    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
-    if (amounts.length === 0) return {};
-    const max = Math.max(...amounts);
-    const min = Math.min(...amounts);
     const amt = parseAmount(donor.bid);
-    if (amt <= 0 || max === min) return {};
-    if (amt === max) return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
-    if (amt === min) return { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D'  };
-    return { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' };
+    if (amt <= 0) return {};
+    // ★ FIX (client-reported): don't colour-rank a bid until EVERY donor in
+    // the group has actually bid — same allBidsIn gate the dots use in
+    // renderGroupDots. Without this, the very first bid to land in a group
+    // was immediately marked red as "the lowest", even though nobody else
+    // had bid yet and it was really the ONLY bid so far (still just teal in
+    // the dots). Leave it unstyled/neutral until the round is actually
+    // decided for this group.
+    const totalDonors = donors.length;
+    const bidCount = donors.filter(d => d.bid != null && parseAmount(d.bid) > 0).length;
+    if (totalDonors === 0 || bidCount < totalDonors) return {};
+    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    const min = Math.min(...amounts);
+    const minCount = amounts.filter(a => a === min).length;
+    // The lowest bid sets what the whole group pays, so it's flagged red
+    // when it's uniquely the lowest, or orange when it TIES for lowest with
+    // another donor — same convention as the per-donor dots. Every other
+    // donor (i.e. anyone not at the lowest amount) is green.
+    if (amt === min) return minCount > 1
+      ? { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' }
+      : { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D' };
+    return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
   };
 
   // Same rank colouring, for the Round Overview / Summary history drill-down.
@@ -1472,13 +1507,16 @@ const handleEndEvent = async () => {
   const getHistoryDonorRankStyle = (donor: HistoryDonor, donors: HistoryDonor[]): React.CSSProperties => {
     const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
     if (amounts.length === 0) return {};
-    const max = Math.max(...amounts);
     const min = Math.min(...amounts);
+    const minCount = amounts.filter(a => a === min).length;
     const amt = parseAmount(donor.bid);
-    if (amt <= 0 || max === min) return {};
-    if (amt === max) return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
-    if (amt === min) return { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D'  };
-    return { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' };
+    if (amt <= 0) return {};
+    // Same fix and rationale as getDonorRankStyle above, applied to the
+    // Round Overview / Summary history drill-down.
+    if (amt === min) return minCount > 1
+      ? { background: '#FFF8F0', borderRadius: 12, border: '2px solid #FCB040' }
+      : { background: '#FEF2F2', borderRadius: 12, border: '2px solid #F54A4D' };
+    return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
   };
 
   // ── Same rank colouring for the Proposed Group Allocations sheet ──
@@ -1876,7 +1914,7 @@ const handleCopy = async (text: string, field: string) => {
                 <h3 className="ve-sheet-title">Waiting Room{waitingRoomDonors.length > 0 ? ` (${waitingRoomDonors.length})` : ''}</h3>
               </div>
               <p style={{ margin: '4px 24px 14px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
-                Donors who've viewed this event before joining.
+                Donors who have viewed the event and are ready to join.
               </p>
 
               <div className="ve-donor-list" style={{ maxHeight: '42vh', overflowY: 'auto', padding: '0 20px' }}>
@@ -2172,7 +2210,7 @@ const handleCopy = async (text: string, field: string) => {
                               {unreadDonorIds.has(donor.groupMemberId) && <span className="ve-donor-msg-dot" />}
                             </button>
                           ) : null}
-                          <span className="ve-donor-remove">⊗</span>
+                          {/*<span className="ve-donor-remove">⊗</span>*/}
                         </div>
                         <div className="ve-all-donor-amounts">
                           {donor.totalCommitted && (
@@ -2457,7 +2495,7 @@ const handleCopy = async (text: string, field: string) => {
                       </button>
                     ) : null}
                     <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
-                    <span className="ve-donor-remove">⊗</span>
+						{/*<span className="ve-donor-remove">⊗</span>*/}
                   </div>
                 ))}
               </div>
