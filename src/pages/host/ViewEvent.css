@@ -1335,7 +1335,7 @@
 .ve-pga-summary-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     padding: 10px 20px 8px;
     flex-shrink: 0;
 }

@@ -243,6 +243,18 @@ const ViewEvent: React.FC = () => {
   const pgaPauseLastRef                 = useRef(0);
   const PGA_PAUSE_COOLDOWN_MS           = 700;
   const [pgaCreateLoading, setPgaCreateLoading] = useState(false);
+  // Create-new-group confirm/error modals — same client-side precheck pattern
+  // as the move flow's pgaOverflowConfirm/pgaMoveErrorModal: shown BEFORE the
+  // backend is hit, so the host sees the current group size and the resulting
+  // split up front, and a split that would leave either side with only 1
+  // member is blocked outright (mirrors the backend's "at least 2 members"
+  // rule already enforced for moves) rather than round-tripping to a 422.
+  const [pgaCreateConfirm, setPgaCreateConfirm] = useState<{
+    currentSize: number;
+    remainingSize: number;
+    newGroupSize: number;
+  } | null>(null);
+  const [pgaCreateErrorModal, setPgaCreateErrorModal] = useState<string | null>(null);
   const moveSheetRef                    = useRef<HTMLDivElement>(null);
 
   // ─── PGA drag-and-drop (single member, quick move) ────────────────────────
@@ -1164,6 +1176,39 @@ const handleEndEvent = async () => {
     }
   };
 
+  // ── Precheck before creating a new group ────────────────────────────────
+  // Triggered by the "Create new group" row in the action sheet, in place of
+  // calling pgaCreateGroupAndMove directly. Computes what the split would
+  // look like — current size, and the two resulting sizes — entirely
+  // client-side (pgaGroups is already loaded), and either:
+  //   - blocks with pgaCreateErrorModal if either resulting group would be
+  //     a singleton (1 member), same hard rule the backend enforces for
+  //     moves, or
+  //   - opens pgaCreateConfirm so the host sees the current group size and
+  //     the resulting split before anything is sent to the backend.
+  // Deliberately leaves pgaActionSheet open (just hidden behind the confirm
+  // modal via the render condition below) so pgaCreateGroupAndMove — left
+  // completely untouched — still reads fromGroupId/selectedMemberIds from it
+  // once the host actually confirms.
+  const pgaOpenCreateGroupConfirm = () => {
+    const { fromGroupId, selectedMemberIds } = pgaActionSheet;
+    if (!fromGroupId || selectedMemberIds.length === 0) { pgaCloseActionSheet(); return; }
+    const fromGroup = pgaGroups.find(g => g.id === fromGroupId);
+    if (!fromGroup) { pgaCloseActionSheet(); return; }
+
+    const currentSize   = fromGroup.members.length;
+    const newGroupSize  = selectedMemberIds.length;
+    const remainingSize = currentSize - newGroupSize;
+
+    if (remainingSize === 1 || newGroupSize === 1) {
+      pgaCloseActionSheet();
+      setPgaCreateErrorModal('Groups must have at least 2 members. Select more members to split off, or fewer, so neither group is left with just 1.');
+      return;
+    }
+
+    setPgaCreateConfirm({ currentSize, remainingSize, newGroupSize });
+  };
+
   // ── Create new group and move selected members into it ────────────────────
   const pgaCreateGroupAndMove = async () => {
     const { fromGroupId, selectedMemberIds } = pgaActionSheet;
@@ -1195,6 +1240,24 @@ const handleEndEvent = async () => {
       await moveGroupMembers(Number(eventId), fromGroupId, res.group.id, selectedMemberIds);
       const count = selectedMemberIds.length;
       setPgaToast(`${count} member${count !== 1 ? 's' : ''} moved to ${res.group.name}`);
+      // Reflect the actual resulting split in the "Group size options" input —
+      // it previously kept showing the round's stale configured capacity (e.g.
+      // still "4" after a 4-member group was split into 2 and 2), since that
+      // input mirrors the next round's target capacity rather than any one
+      // group's live headcount. Seed it with the smaller of the two resulting
+      // groups so it reflects what the host just did; they can still overwrite
+      // it and hit "Apply custom size" if they want something else.
+      const remainingCount   = (fromGroup?.members.length ?? 0) - movedMembers.length;
+      const smallestSplitSize = Math.min(remainingCount, movedMembers.length);
+      if (smallestSplitSize > 0) {
+        setEditGroupSize(String(smallestSplitSize));
+        // Persist it too, the same way handleChooseGroupSize pairs
+        // setEditGroupSize with applyGroupSize elsewhere in this file —
+        // otherwise the input only looked updated locally and reverted back
+        // to the old configured size on reload, since nothing had actually
+        // told the backend the target capacity changed.
+        await applyGroupSize(smallestSplitSize);
+      }
     } catch (err) {
       console.error(err);
       await refreshEvent();
@@ -1435,9 +1498,28 @@ const handleEndEvent = async () => {
   const DOT_ORANGE = '#FCB040';
   const DOT_GREEN  = '#4CAF50';
 
+  // Host request: the dots must wait for the group's CONFIGURED capacity to be
+  // reached, not just for every donor who happens to have joined so far. E.g.
+  // group_size = 2 but only 1 donor has joined the whole event yet -> that lone
+  // donor's bid must NOT be treated as "all bids in" (it was, since totalBids
+  // was only counting the roster actually assigned so far). Round 1 uses the
+  // raw group_size; Round 2+ uses the doubled group_size_after_r1, same pattern
+  // already used elsewhere in this file (see editGroupSize initialisation above).
+  const configuredRoundCapacity = (() => {
+    const base = Number(apiEvent?.group_size ?? 0);
+    if (currentRoundNum < 2) return base;
+    const after = (apiEvent as any)?.group_size_after_r1;
+    return (after !== null && after !== undefined && Number(after) > 0) ? Number(after) : base * 2;
+  })();
+
   const renderGroupDots = (group: Group) => {
     const donors = group.donors.slice(0, MAX_DOTS);
-    const allBidsIn = group.totalBids > 0 && group.bids === group.totalBids;
+    const allBidsIn = group.totalBids > 0
+      && group.bids === group.totalBids
+      // Don't flip colours on until the group has actually reached its
+      // configured capacity -- a partially-formed group (fewer donors joined
+      // than group_size) is not "done" just because everyone in it so far bid.
+      && (configuredRoundCapacity <= 0 || group.totalBids >= configuredRoundCapacity);
 
     // Only needed once every donor has bid — find the lowest bid amount and
     // how many donors share it, to distinguish a unique low from a tied low.
@@ -1454,20 +1536,25 @@ const handleEndEvent = async () => {
     return donors.map((d, i) => {
       const hasBid = d.bid != null && parseAmount(d.bid) > 0;
       let color = DOT_WHITE;
-      if (hasBid) {
-        if (!allBidsIn) {
-          color = DOT_TEAL;
-        } else {
-          const amt = parseAmount(d.bid);
-          if (amt === minAmount) color = minCount > 1 ? DOT_ORANGE : DOT_RED;
-          else color = DOT_GREEN;
-        }
+      // Host request: don't colour any dot (not even teal) until every donor
+      // in the group has bid — only then reveal the red/orange/green standing.
+      // While the group is still waiting on bids, all dots stay white/hollow
+      // regardless of individual bid status.
+      if (hasBid && allBidsIn) {
+        const amt = parseAmount(d.bid);
+        if (amt === minAmount) color = minCount > 1 ? DOT_ORANGE : DOT_RED;
+        else color = DOT_GREEN;
       }
+      // Border keyed off the final colour (not hasBid) — a donor who bid but
+      // is still showing white (group hasn't reached capacity yet) needs the
+      // hollow-circle border too, otherwise it's an invisible white dot on
+      // the white card background.
+      const isWhite = color === DOT_WHITE;
       return (
         <div
           key={d.groupMemberId ?? i}
           className="ve-dot"
-          style={{ background: color, border: hasBid ? 'none' : '1px solid #D8DCE1' }}
+          style={{ background: color, border: isWhite ? '1px solid #D8DCE1' : 'none' }}
         />
       );
     });
@@ -2758,7 +2845,7 @@ const handleCopy = async (text: string, field: string) => {
             </div>
 
             {/* ── Action sheet: Move / Delete / New Group ── */}
-            {pgaActionSheet.open && (
+            {pgaActionSheet.open && !pgaCreateConfirm && !pgaCreateErrorModal && (
               <div className="ve-pga-move-backdrop">
                 <div className="ve-pga-move-sheet" ref={moveSheetRef}>
                   <div className="ve-sheet-handle" />
@@ -2774,7 +2861,7 @@ const handleCopy = async (text: string, field: string) => {
                       <span>Move to existing group</span>
                     </button>
                     {/* Create new group */}
-                    <button className="ve-pga-action-row ve-pga-action-row--create" onClick={pgaCreateGroupAndMove} disabled={pgaCreateLoading}>
+                    <button className="ve-pga-action-row ve-pga-action-row--create" onClick={pgaOpenCreateGroupConfirm} disabled={pgaCreateLoading}>
                       <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                         <circle cx="9" cy="9" r="7.5" stroke="#2BA7A0" strokeWidth="1.5"/>
                         <path d="M9 6v6M6 9h6" stroke="#2BA7A0" strokeWidth="1.6" strokeLinecap="round"/>
@@ -2885,6 +2972,58 @@ const handleCopy = async (text: string, field: string) => {
                 </div>
               </>
             )}
+
+            {/* ══ Create-group confirm: shows current group size and the resulting split ══
+                NOTE: rendered via createPortal to document.body with an explicit
+                high z-index, same fix as showLaunchRoundConfirm above — this sheet
+                is triggered from deep inside the PGA sheet, whose own transformed
+                container breaks position:fixed for normal descendants, so without
+                the portal this rendered pushed into the page flow instead of as a
+                floating overlay. */}
+            {pgaCreateConfirm && createPortal((
+              <div style={{ position: 'fixed', inset: 0, zIndex: 20000 }}>
+                <div className="ve-backdrop" style={{ zIndex: 20000 }} onClick={() => { if (!pgaCreateLoading) setPgaCreateConfirm(null); }} />
+                <div className="ve-sheet" style={{ zIndex: 20001 }}>
+                  <div className="ve-sheet-handle" />
+                  <div className="ve-sheet-header">
+                    <h3 className="ve-sheet-title">Split this group?</h3>
+                  </div>
+                  <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                    This group currently has {pgaCreateConfirm.currentSize} members. Creating a new group will split it into {pgaCreateConfirm.remainingSize} and {pgaCreateConfirm.newGroupSize} members.
+                  </p>
+                  <div style={{ display: 'flex', gap: 12, padding: '0 20px 8px' }}>
+                    <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!pgaCreateLoading) setPgaCreateConfirm(null); }}>Cancel</div>
+                    <div
+                      className="ve-call-time-btn"
+                      style={{ flex: 1, opacity: pgaCreateLoading ? 0.6 : 1 }}
+                      onClick={pgaCreateLoading ? undefined : () => { setPgaCreateConfirm(null); pgaCreateGroupAndMove(); }}
+                    >
+                      {pgaCreateLoading ? 'Creating…' : 'Yes'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ), document.body)}
+
+            {/* ══ Blocking error: split would leave a group with fewer than 2 members ══
+                Same portal fix as pgaCreateConfirm above. */}
+            {pgaCreateErrorModal && createPortal((
+              <div style={{ position: 'fixed', inset: 0, zIndex: 20000 }}>
+                <div className="ve-backdrop" style={{ zIndex: 20000 }} onClick={() => setPgaCreateErrorModal(null)} />
+                <div className="ve-sheet" style={{ zIndex: 20001 }}>
+                  <div className="ve-sheet-handle" />
+                  <div className="ve-sheet-header">
+                    <h3 className="ve-sheet-title">Can't create group</h3>
+                  </div>
+                  <p style={{ margin: '4px 24px 18px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                    {pgaCreateErrorModal}
+                  </p>
+                  <div style={{ padding: '0 20px 8px' }}>
+                    <div className="ve-sheet-close" style={{ marginTop: 0 }} onClick={() => setPgaCreateErrorModal(null)}>OK</div>
+                  </div>
+                </div>
+              </div>
+            ), document.body)}
           </>
         )}
 
