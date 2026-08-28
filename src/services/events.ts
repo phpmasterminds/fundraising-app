@@ -433,3 +433,32 @@ export async function getUnreadDonorMessageIds(eventId: number): Promise<number[
   );
   return data.group_member_ids;
 }
+
+// ★ NEW: donor's persistent "message the host" icon (BidFlow) - full two-way
+// thread for one event, distinct from getPendingMessages()/ackMessages() above
+// (that pair is the account-wide FIFO queue feeding the global notification
+// modal; this is a plain per-event thread the donor can open any time).
+
+export interface DonorThreadMessage {
+  id:         number;
+  body:       string;
+  from:       'host' | 'donor';
+  status:     'sent' | 'delivered' | 'seen';
+  created_at: string;
+}
+
+/** Donor: full thread with the host for one event, oldest → newest. Opening it also clears the unread dot server-side. */
+export async function getMyMessageThread(eventId: number): Promise<DonorThreadMessage[]> {
+  const { data } = await api.get<{ messages: DonorThreadMessage[] }>(
+    `/donor/events/${eventId}/messages`,
+  );
+  return data.messages;
+}
+
+/** Donor: unread host-message count for one event, for the message icon's red dot. Safe to poll — doesn't mark anything read. */
+export async function getUnreadHostMessageCount(eventId: number): Promise<number> {
+  const { data } = await api.get<{ unread: number }>(
+    `/donor/events/${eventId}/messages/unread-count`,
+  );
+  return data.unread;
+}

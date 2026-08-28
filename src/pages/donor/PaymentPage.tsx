@@ -174,6 +174,13 @@ const PaymentPage: React.FC = () => {
                   {summary.rounds_detail.map((r) => {
                     const hasBids = !!r.group_bids && r.group_bids.length > 0;
                     const isOpen = hasBids && expandedRound === r.round;
+                    // ★ Highest bid in this round's group — the backend already flags the
+                    // lowest bid via is_minimum, so this is the only extra rank needed to
+                    // get the full red (lowest) / orange (middle) / green (highest) scheme
+                    // used throughout the rest of the app, computed straight from the same
+                    // amounts already in group_bids.
+                    const amounts = hasBids ? r.group_bids!.map(x => Number(x.amount)).filter(a => a > 0) : [];
+                    const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
                     return (
                       <div className="pp-rs-round" key={r.round}>
                         <button
@@ -197,19 +204,24 @@ const PaymentPage: React.FC = () => {
 
                         {isOpen && (
                           <div className="pp-rs-bids">
-                            {r.group_bids!.map((b, i) => (
-                              <div
-                                key={i}
-                                className={`pp-rs-bid ${b.is_minimum ? 'pp-rs-bid--min' : ''} ${b.is_you ? 'pp-rs-bid--you' : ''}`}
-                              >
-                                <div className={`pp-rs-avatar ${b.is_you ? 'pp-rs-avatar--you' : b.is_minimum ? 'pp-rs-avatar--min' : ''}`}>
-                                  {b.initial}
+                            {r.group_bids!.map((b, i) => {
+                              // red = lowest (matched amount, from the backend's own is_minimum),
+                              // green = highest, orange = everyone in between. "You" is shown
+                              // only via the name label below — no separate colour override.
+                              const isMin = b.is_minimum;
+                              const isMax = !isMin && maxAmt !== null && Number(b.amount) === maxAmt && amounts.length > 1;
+                              const tier = isMin ? 'min' : isMax ? 'max' : 'mid';
+                              return (
+                                <div key={i} className={`pp-rs-bid pp-rs-bid--${tier}`}>
+                                  <div className={`pp-rs-avatar pp-rs-avatar--${tier}`}>
+                                    {b.initial}
+                                  </div>
+                                  <span className="pp-rs-name">{b.is_you ? 'You' : b.pseudonym}</span>
+                                  <span className={`pp-rs-amount pp-rs-amount--${tier}`}>£{b.amount}</span>
+                                  {isMin && <span className="pp-rs-min-badge">min</span>}
                                 </div>
-                                <span className="pp-rs-name">{b.is_you ? 'You' : b.pseudonym}</span>
-                                <span className={`pp-rs-amount ${b.is_minimum ? 'pp-rs-amount--min' : ''}`}>£{b.amount}</span>
-                                {b.is_minimum && <span className="pp-rs-min-badge">min</span>}
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -318,15 +330,21 @@ const PaymentPage: React.FC = () => {
           .pp-rs-bids{ padding:2px 0 10px; }
           .pp-rs-bid{ display:flex; align-items:center; gap:10px; padding:7px 10px; border:1px solid #F1F2F6; border-radius:16px; background:#F8F9FB; margin-bottom:8px; }
           .pp-rs-bid:last-child{ margin-bottom:0; }
-          .pp-rs-bid--min{ background:#FFF5EC; }
-          .pp-rs-bid--you{ background:#EAF6F5; }
+          .pp-rs-bid--min{ background:#FDEDEE; } /* ★ red = lowest (was incorrectly orange) */
+          .pp-rs-bid--mid{ background:#FFF5EC; } /* orange = middle */
+          .pp-rs-bid--max{ background:#EAF6F5; } /* green/teal = highest */
+          .pp-rs-bid--you{ background:#EAF6F5; } /* superseded — no longer applied, kept per no-code-loss */
           .pp-rs-avatar{ width:30px; height:30px; border-radius:50%; background:#F1F2F6; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#9AA0A6; flex-shrink:0; }
-          .pp-rs-avatar--min{ background:#FFE8D4; color:#C4821F; border:1.5px solid #FCB040; }
-          .pp-rs-avatar--you{ background:#C8EDE9; color:#16837E; border:1.5px solid #2BA7A0; }
+          .pp-rs-avatar--min{ background:#FBD7D9; color:#C0392B; border:1.5px solid #EF5350; } /* red = lowest */
+          .pp-rs-avatar--mid{ background:#FFE8D4; color:#C4821F; border:1.5px solid #FCB040; } /* orange = middle */
+          .pp-rs-avatar--max{ background:#C8EDE9; color:#16837E; border:1.5px solid #2BA7A0; } /* green/teal = highest */
+          .pp-rs-avatar--you{ background:#C8EDE9; color:#16837E; border:1.5px solid #2BA7A0; } /* superseded — no longer applied, kept per no-code-loss */
           .pp-rs-name{ flex:1; font-size:13px; font-weight:600; color:#1A1A2E; }
           .pp-rs-amount{ font-size:13px; font-weight:700; color:#1A1A2E; }
-          .pp-rs-amount--min{ color:#C4821F; }
-          .pp-rs-min-badge{ background:#FFF0E0; color:#C4821F; font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; border:1px solid #FCB040; }
+          .pp-rs-amount--min{ color:#C0392B; }
+          .pp-rs-amount--mid{ color:#C4821F; }
+          .pp-rs-amount--max{ color:#16837E; }
+          .pp-rs-min-badge{ background:#FDEDEE; color:#C0392B; font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; border:1px solid #EF5350; }
         `}</style>
       </IonContent>
     </IonPage>

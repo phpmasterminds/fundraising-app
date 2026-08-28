@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { createRoot, type Root } from 'react-dom/client';
 import {
   getDonorEventDetail,
   getCurrentRound,
@@ -15,6 +16,12 @@ import {
   type RoundState,
   type PaymentSummary,
 } from '../../services/donorEvents';
+import {
+  getMyMessageThread,
+  getUnreadHostMessageCount,
+  replyToHost,
+  type DonorThreadMessage,
+} from '../../services/events';
 import { isOffline, onConnectionChange } from '../../services/connectionStatus';
 import { useLockedBack, useEventLock } from '../../components/EventLockGate';
 import './BidFlow.css';
@@ -51,13 +58,21 @@ const BidFlow: React.FC = () => {
   // useLockedBack keeps the donor inside their event while the lock is on,
   // and behaves like a normal back once it releases.
   const goBack = useLockedBack();
-  const { refresh: refreshLock } = useEventLock();
+  const { lock, refresh: refreshLock } = useEventLock();
 
   const searchParams   = new URLSearchParams(location.search);
   const eventIdFromUrl = parseInt(searchParams.get('id') ?? '0', 10);
   const stateEventId   = location.state?.eventId ?? eventIdFromUrl;
 
   const [eventId,     setEventId]     = useState(stateEventId);
+
+  // useLockedBack() replaces to lockedPathFor(lock.event_id) while the donor
+  // is locked into THIS event -- which, on the confirm-bid screen below, is
+  // the exact route already on screen. That makes the back arrow a same-place
+  // no-op with no visible effect, which client feedback flagged as a button
+  // that "doesn't do anything." We hide the button in that state rather than
+  // leave a dead affordance on screen (Quit Event remains the way to leave).
+  const backIsNoOp = !!lock && lock.locked && lock.event_id === eventId && lock.reason !== 'payment_due';
   const [totalRounds, setTotalRounds] = useState(location.state?.totalRounds ?? 0);
   const [eventName,   setEventName]   = useState(location.state?.eventName   ?? '');
   const [myPseudonym, setMyPseudonym] = useState(location.state?.myPseudonym ?? 'You');
@@ -66,6 +81,17 @@ const BidFlow: React.FC = () => {
 
   const [screen,        setScreen]       = useState<Screen>('starting');
   const [checking,      setChecking]     = useState(true); // checking event status on mount
+
+  // All payment handling (amount owed, "mark as paid", receipt) now lives on
+  // its own page at /payment/:id — BidFlow no longer shows payment information
+  // or drives the donor through payment-intro/payment-form/receipt itself.
+  // Every place that used to setScreen('payment-intro' | 'receipt') hands off
+  // here instead. The old screens' JSX/state below is left in place (unused)
+  // rather than deleted, per the no-code-loss rule.
+  const goToPayment = useCallback(() => {
+    router.push(`/payment/${eventId}`, 'forward', 'push');
+  }, [router, eventId]);
+
   const [bidAmount,     setBidAmount]    = useState(0);
   const [inputVal,      setInputVal]     = useState('0');
   const [submitting,    setSubmitting]   = useState(false);
@@ -124,6 +150,112 @@ const BidFlow: React.FC = () => {
     }
     return () => { el?.remove(); };
   }, [disconnected]);
+
+  // ★ NEW: donor -> host message icon, persistent across every screen.
+  // Same reasoning as the offline banner just above (many separate early-return
+  // screens, no single shared JSX return point) — but this widget is interactive
+  // (icon + modal + form), so rather than raw textContent, a standalone React
+  // root is mounted once on a body-appended div and re-rendered imperatively
+  // whenever the relevant state changes. No screen's own JSX is touched.
+  const [msgOpen,        setMsgOpen]        = useState(false);
+  const [msgThread,      setMsgThread]      = useState<DonorThreadMessage[]>([]);
+  const [msgLoading,     setMsgLoading]     = useState(false);
+  const [msgSending,     setMsgSending]     = useState(false);
+  const [msgError,       setMsgError]       = useState('');
+  const [msgDraft,       setMsgDraft]       = useState('');
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const msgRootRef = useRef<Root | null>(null);
+
+  const loadMsgThread = useCallback(async () => {
+    if (!stateEventId) return;
+    setMsgLoading(true);
+    setMsgError('');
+    try {
+      const thread = await getMyMessageThread(stateEventId);
+      setMsgThread(thread);
+      setUnreadMsgCount(0); // opening the thread also clears it server-side
+    } catch (e: any) {
+      setMsgError(e?.message ?? 'Could not load messages. Please try again.');
+    } finally {
+      setMsgLoading(false);
+    }
+  }, [stateEventId]);
+
+  const openMsgWidget = useCallback(() => {
+    setMsgOpen(true);
+    loadMsgThread();
+  }, [loadMsgThread]);
+
+  const sendMsgToHost = useCallback(async () => {
+    if (!stateEventId || msgSending) return;
+    const body = msgDraft.trim();
+    if (!body) return;
+    setMsgSending(true);
+    setMsgError('');
+    try {
+      await replyToHost(stateEventId, body);
+      setMsgDraft('');
+      await loadMsgThread(); // refresh so the new message + status appears in-thread
+    } catch (e: any) {
+      setMsgError(e?.message ?? 'Failed to send. Please try again.');
+    } finally {
+      setMsgSending(false);
+    }
+  }, [stateEventId, msgSending, msgDraft, loadMsgThread]);
+
+  // Mount the standalone root once, on unmount tear it down.
+  useEffect(() => {
+    const el = document.createElement('div');
+    el.setAttribute('data-peerfund-msg-widget', '1');
+    document.body.appendChild(el);
+    msgRootRef.current = createRoot(el);
+    return () => {
+      msgRootRef.current?.unmount();
+      el.remove();
+    };
+  }, []);
+
+  // Re-render the widget whenever anything it displays changes.
+  useEffect(() => {
+    if (!stateEventId) return; // nothing to message about without an event
+    msgRootRef.current?.render(
+      <MsgHostWidget
+        open={msgOpen}
+        unread={unreadMsgCount}
+        thread={msgThread}
+        loading={msgLoading}
+        sending={msgSending}
+        error={msgError}
+        draft={msgDraft}
+        onOpen={openMsgWidget}
+        onClose={() => setMsgOpen(false)}
+        onDraftChange={setMsgDraft}
+        onSend={sendMsgToHost}
+      />
+    );
+  }, [stateEventId, msgOpen, unreadMsgCount, msgThread, msgLoading, msgSending, msgError, msgDraft, openMsgWidget, sendMsgToHost]);
+
+  // Poll the unread count quietly in the background (mirrors the 15s cadence
+  // the global DonorMessageListener already uses elsewhere in the app).
+  useEffect(() => {
+    if (!stateEventId) return;
+    const poll = () => {
+      getUnreadHostMessageCount(stateEventId).then(setUnreadMsgCount).catch(() => {});
+    };
+    poll();
+    const t = setInterval(poll, 15000);
+    return () => clearInterval(t);
+  }, [stateEventId]);
+
+  // While the thread is open, refresh it every 5s so an incoming host reply
+  // shows up without the donor needing to close and reopen it.
+  useEffect(() => {
+    if (!msgOpen || !stateEventId) return;
+    const t = setInterval(() => {
+      getMyMessageThread(stateEventId).then(setMsgThread).catch(() => {});
+    }, 5000);
+    return () => clearInterval(t);
+  }, [msgOpen, stateEventId]);
 
   // Server-seeded timers
   const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
@@ -203,13 +335,22 @@ const BidFlow: React.FC = () => {
     // Always check round status first to handle finished events immediately
     getRoundStatus(stateEventId).then(res => {
       if (res.payment_status === 'paid') {
-        // Already paid — go straight to receipt
+        // Already paid — hand off to the payment page rather than showing
+        // a receipt here (all payment info lives on /payment/:id now).
         setHasPaid(true);
-        getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
-        setScreen('receipt');
+        goToPayment();
       } else if (res.event_status === 'finished' || res.round_status === 'finished') {
-        setScreen('payment-intro');
+        // ★ Show "Round N Complete!" (round-results) first, with its own manual
+        // "View Event Summary" button, instead of jumping straight to payment-intro.
+        // Payment summary is still prefetched in the background so it's ready instantly
+        // once the donor taps through.
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
+        getCurrentRound(stateEventId).then(d => {
+          setRoundData(d);
+          setCurrentRound(prev => Math.max(prev, d.round_number));
+        }).catch(() => {});
+        setGroupBidsOpen(false);
+        setScreen('round-results');
       } else if (res.round_status === 'waiting') {
         // Landing during the between-rounds gap (fresh join or refresh): show the existing
         // waiting screen instead of round-results, which would read as "No bids placed / £0"
@@ -277,9 +418,14 @@ const BidFlow: React.FC = () => {
     // First check if event is still active
     getRoundStatus(eventId).then(res => {
       if (res.event_status === 'finished' || res.round_status === 'finished') {
-        // Event already finished — go to payment
-        setScreen('payment-intro');
+        // ★ Event already finished — show "Round N Complete!" first, not payment directly.
         getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+        getCurrentRound(eventId).then(d => {
+          setRoundData(d);
+          setCurrentRound(prev => Math.max(prev, d.round_number));
+        }).catch(() => {});
+        setGroupBidsOpen(false);
+        setScreen('round-results');
         return;
       }
       // Fetch round data
@@ -329,17 +475,24 @@ const BidFlow: React.FC = () => {
           getCurrentRound(eventId).then(d => setRoundData(d)).catch(() => {});
         }
 
-        // Host finished the whole event
+        // Host finished the whole event — hand off to the payment page
+        // (all payment info lives on /payment/:id now, not here).
         if (res.payment_status === 'paid') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
-          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-          setScreen('receipt');
+          goToPayment();
           return;
         }
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
+          // ★ Show "Round N Complete!" first, not payment directly.
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-          setScreen('payment-intro');
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
           return;
         }
 
@@ -430,11 +583,17 @@ const BidFlow: React.FC = () => {
           // Timer hit 0 — immediately ask server what happened
           getRoundStatus(eventId).then(res => {
             if (res.payment_status === 'paid') {
-              getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-              setScreen('receipt');
+              // Hand off to the payment page (all payment info lives on /payment/:id now).
+              goToPayment();
             } else if (res.event_status === 'finished' || res.round_status === 'finished') {
+              // ★ Show "Round N Complete!" first, not payment directly.
               getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-              setScreen('payment-intro');
+              getCurrentRound(eventId).then(d => {
+                setRoundData(d);
+                setCurrentRound(prev => Math.max(prev, d.round_number));
+              }).catch(() => {});
+              setGroupBidsOpen(false);
+              setScreen('round-results');
             } else if (res.round_status === 'closed' || res.round_status === 'grouping') {
               // Round just closed — move to results
               getCurrentRound(eventId).then(d => {
@@ -470,14 +629,21 @@ const BidFlow: React.FC = () => {
       try {
         const res = await getRoundStatus(eventId);
         if (res.payment_status === 'paid') {
+          // Hand off to the payment page (all payment info lives on /payment/:id now).
           clearInterval(pollRef.current); setRoundEnding(false);
-          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-          setScreen('receipt'); return;
+          goToPayment(); return;
         }
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current); setRoundEnding(false);
+          // ★ Show "Round N Complete!" first, not payment directly.
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
-          setScreen('payment-intro'); return;
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results'); return;
         }
         if (res.round_status === 'closed' || res.round_status === 'grouping') {
           clearInterval(pollRef.current); setRoundEnding(false);
@@ -557,10 +723,13 @@ const BidFlow: React.FC = () => {
       try {
         const res = await getRoundStatus(eventId);
 
-        // Event finished → payment screen (always check this first, including last round)
+        // ★ Event finished — the donor is already sitting on "Round N Complete!"
+        // (round-results renders its own "View Event Summary" button once
+        // currentRound >= totalRounds, further down). Previously this jumped straight
+        // to payment-intro here, skipping that screen even though the donor hadn't
+        // asked to move on. Now just prefetch the summary quietly and stay put.
         if (res.round_status === 'finished' || res.event_status === 'finished') {
           clearInterval(pollRef.current);
-          setScreen('payment-intro');
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
         }
@@ -705,9 +874,9 @@ const BidFlow: React.FC = () => {
     pollRef.current = setInterval(async () => {
       try {
         const res = await getRoundStatus(eventId);
+        // ★ Stay on "Round N Complete!" — see the matching comment in Effect 6 above.
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current);
-          setScreen('payment-intro');
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
         }
@@ -778,8 +947,15 @@ const BidFlow: React.FC = () => {
           setScreen('confirm-bid');
         } else if (res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
-          setScreen('payment-intro');
+          // ★ Show "Round N Complete!" first, not payment directly.
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
         }
       } catch (_) {}
     }, 5000);
@@ -837,6 +1013,19 @@ const BidFlow: React.FC = () => {
     if (roundSecsLeft !== null && roundSecsLeft <= 0) { setSubmitError('Round has ended. Bidding is closed.'); return; }
     setSubmitError('');
     if (ignoreZeroBids && (!bidAmount || bidAmount <= 0)) { setSubmitError('Please enter a bid amount.'); return; }
+    // ★ Once a bid has been placed for THIS round, the donor may only raise it (or
+    // keep it the same) — never lower it, for any round. The last-placed amount for
+    // this round already lives in localStorage (peerfund_bidplaced_<event>_<round>,
+    // written just below on every successful submit, and read on refresh a few lines
+    // up), so it doubles as the floor here without adding new state.
+    const prevPlacedRaw = localStorage.getItem(`peerfund_bidplaced_${stateEventId}_${currentRound}`);
+    if (prevPlacedRaw !== null) {
+      const prevPlacedAmt = parseInt(prevPlacedRaw, 10);
+      if (!isNaN(prevPlacedAmt) && bidAmount < prevPlacedAmt) {
+        setSubmitError(`You already placed £${fmtAmount(prevPlacedAmt)} this round — you can only bid £${fmtAmount(prevPlacedAmt)} or higher.`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       await submitBid(eventId, bidAmount);
@@ -1268,12 +1457,18 @@ const confirmQuit = async () => {
       {thanksBidModal}
       <div className="bf-s3">
         <div className="bf-s3-nav">
+          {/* Hidden while backIsNoOp: on this screen useLockedBack() would just
+              replace() to the route already on screen (see backIsNoOp above) --
+              a button with no visible effect. Kept in code, not deleted, so it
+              still renders normally once the lock releases. */}
+          {!backIsNoOp && (
           <button className="bf-back-circle" onClick={goBack}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M7.99967 12.6666L3.33301 7.99998L7.99967 3.33331" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M12.6663 8H3.33301" stroke="#25201D" strokeWidth="1.33333" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
+          )}
           <span className="bf-s3-nav-title">Waiting for others to bid</span>
         </div>
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
@@ -1475,6 +1670,10 @@ const confirmQuit = async () => {
         </div>
         {currentRound >= totalRounds ? (
           <>
+            {/* Payment amount card removed here — all payment info now lives on
+               /payment/:id, not in BidFlow. Kept as a comment (not deleted) in case
+               it's ever needed again; "paymentTotal" itself is still computed above
+               for internal use (e.g. the now-dead payment-intro/receipt screens).
             {paymentTotal > 0 && (
               <div className="bf-card bf-card--row bf-card--cumul" style={{ marginTop: 12 }}>
                 <div>
@@ -1483,11 +1682,10 @@ const confirmQuit = async () => {
                 </div>
                 <span className="bf-cumul-val">£{fmtAmount(paymentTotal)}</span>
               </div>
-            )}
+            )} */}
             <p style={{ textAlign:'center', color:'#9AA0A6', fontSize:13, margin:'16px 0 8px' }}>All rounds complete — preparing payment...</p>
-            <button className="bf-orange-btn bf-full-btn"
-              onClick={() => { getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {}); setScreen('payment-intro'); }}>
-              Make Payment →
+            <button className="bf-orange-btn bf-full-btn" onClick={goToPayment}>
+              View Event Summary →
             </button>
           </>
         ) : (
@@ -1759,6 +1957,166 @@ const confirmQuit = async () => {
 };
 
 /* ── Sub-Components ── */
+
+// ★ NEW: donor -> host message icon + full-thread modal. Rendered into a
+// standalone React root mounted on document.body (see the effects above in
+// BidFlow), so it floats on top of every screen regardless of which early
+// return is currently active. Styled with the same design tokens used
+// throughout this file (Outfit font, teal #2BA7A0/#16837E, orange
+// #FCB040/#C5821F, 16px card radius, pill buttons).
+interface MsgHostWidgetProps {
+  open:    boolean;
+  unread:  number;
+  thread:  DonorThreadMessage[];
+  loading: boolean;
+  sending: boolean;
+  error:   string;
+  draft:   string;
+  onOpen:  () => void;
+  onClose: () => void;
+  onDraftChange: (v: string) => void;
+  onSend:  () => void;
+}
+const MsgHostWidget: React.FC<MsgHostWidgetProps> = ({
+  open, unread, thread, loading, sending, error, draft, onOpen, onClose, onDraftChange, onSend,
+}) => {
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (open) threadEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [open, thread]);
+
+  return (
+    <>
+      {/* Floating icon — visible on every screen */}
+      <button
+        onClick={onOpen}
+        aria-label="Message host"
+        style={{
+          // right: 28 (not 16) clears the desktop browser's vertical scrollbar,
+          // which otherwise overlaps this button's top-right corner on web —
+          // no-op on mobile/Capacitor where there's no scrollbar to clear.
+          position: 'fixed', top: 16, right: 28, zIndex: 99990,
+          width: 44, height: 44, borderRadius: '50%', border: 'none',
+          background: '#2BA7A0', boxShadow: '0 4px 14px rgba(22,131,126,0.35)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+        }}
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M2.5 9.5C2.5 5.63 5.91 2.5 10 2.5C14.09 2.5 17.5 5.63 17.5 9.5C17.5 13.37 14.09 16.5 10 16.5C8.79 16.5 7.65 16.22 6.65 15.72L2.5 17L3.63 13.44C2.92 12.28 2.5 10.94 2.5 9.5Z" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        {unread > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
+            borderRadius: 9, background: '#E53E3E', color: '#fff', fontSize: 11, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff',
+          }}>{unread > 9 ? '9+' : unread}</span>
+        )}
+      </button>
+
+      {/* Modal */}
+      {open && (
+        <div
+          onClick={onClose}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 99991, background: 'rgba(13,56,53,0.45)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', width: '100%', maxWidth: 480, borderRadius: '16px 16px 0 0',
+              display: 'flex', flexDirection: 'column', maxHeight: '80vh',
+              boxShadow: '0 -8px 32px rgba(0,0,0,0.18)',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 16px 12px', borderBottom: '1px solid #F1F2F6',
+            }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1A1A2E' }}>Message host</h3>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', lineHeight: 0 }}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <path d="M4 4L14 14M14 4L4 14" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {loading && thread.length === 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
+                  <div className="bf-loading-spin" style={{ width: 28, height: 28 }} />
+                </div>
+              ) : thread.length === 0 ? (
+                <p style={{ margin: '24px 0', textAlign: 'center', color: '#6B7280', fontSize: 13 }}>
+                  No messages yet — say hello!
+                </p>
+              ) : (
+                thread.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      alignSelf: m.from === 'donor' ? 'flex-end' : 'flex-start',
+                      maxWidth: '78%',
+                      background: m.from === 'donor' ? '#2BA7A0' : '#F1F2F6',
+                      color: m.from === 'donor' ? '#fff' : '#1A1A2E',
+                      borderRadius: 14,
+                      padding: '8px 12px',
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{m.body}</p>
+                    <span style={{
+                      display: 'block', marginTop: 4, fontSize: 10,
+                      color: m.from === 'donor' ? 'rgba(255,255,255,0.75)' : '#9CA3AF',
+                      textAlign: m.from === 'donor' ? 'right' : 'left',
+                    }}>
+                      {m.from === 'donor' ? (m.status === 'seen' ? 'Seen' : m.status === 'delivered' ? 'Delivered' : 'Sent') : 'Host'}
+                    </span>
+                  </div>
+                ))
+              )}
+              <div ref={threadEndRef} />
+            </div>
+
+            {error && (
+              <p style={{ margin: '0 16px 8px', fontSize: 12, color: '#E53E3E' }}>{error}</p>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, padding: '12px 16px 16px', borderTop: '1px solid #F1F2F6' }}>
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !sending) onSend(); }}
+                placeholder="Type a message…"
+                style={{
+                  flex: 1, border: '1px solid #E5E7EB', borderRadius: 65, padding: '10px 16px',
+                  fontSize: 14, outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <button
+                onClick={onSend}
+                disabled={sending || !draft.trim()}
+                style={{
+                  border: 'none', borderRadius: 65, padding: '0 20px', fontWeight: 600, fontSize: 14,
+                  background: '#FCB040', color: '#25201D', cursor: sending ? 'default' : 'pointer',
+                  opacity: sending || !draft.trim() ? 0.6 : 1,
+                }}
+              >
+                {sending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 const EventCard: React.FC<{ timer: string; timerOrange: boolean; roundLabel?: string; eventName?: string }> = ({ timer, timerOrange, roundLabel, eventName }) => (
   <div className="bf-event-card">
     <div className="bf-ec-top">

@@ -1514,12 +1514,20 @@ const handleEndEvent = async () => {
 
   const renderGroupDots = (group: Group) => {
     const donors = group.donors.slice(0, MAX_DOTS);
+    // ★ FIX (client-reported): group.totalBids is ALREADY the backend-resolved
+    // per-round capacity (GroupingService::resolveRoundCapacity — same value
+    // powering the "X/Y bids" text just below and PgaGroup.capacity above).
+    // The extra configuredRoundCapacity check below was comparing that correct,
+    // possibly-uneven per-group number against a naive event-level "base group_size
+    // doubled" assumption, so any group whose real size differs from that naive
+    // doubling (e.g. a smaller group from singleton folding / host override) could
+    // show "2/2 bids" complete yet never satisfy totalBids >= configuredRoundCapacity,
+    // leaving its dots permanently white. group.bids === group.totalBids (with
+    // totalBids > 0) is already the correct, capacity-aware "done" signal on its own.
     const allBidsIn = group.totalBids > 0
-      && group.bids === group.totalBids
-      // Don't flip colours on until the group has actually reached its
-      // configured capacity -- a partially-formed group (fewer donors joined
-      // than group_size) is not "done" just because everyone in it so far bid.
-      && (configuredRoundCapacity <= 0 || group.totalBids >= configuredRoundCapacity);
+      && group.bids === group.totalBids;
+      // Old (stale) extra gate — kept for reference, not deleted:
+      // && (configuredRoundCapacity <= 0 || group.totalBids >= configuredRoundCapacity);
 
     // Only needed once every donor has bid — find the lowest bid amount and
     // how many donors share it, to distinguish a unique low from a tied low.
@@ -2761,7 +2769,7 @@ const handleCopy = async (text: string, field: string) => {
                                       : { background: COLORS[mi % COLORS.length], borderRadius: '50%', overflow: 'hidden' }
                                   }
                                 >
-                                  <span className="ve-pga-avatar">{<AvatarContent photoUrl={member.photoUrl} initial={member.initial} />}</span>
+                                  <div className="ve-donor-avatar">{<AvatarContent photoUrl={member.photoUrl} initial={member.initial} />}</div>
                                   {member.selected && (
                                     <span className="ve-pga-check">
                                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
