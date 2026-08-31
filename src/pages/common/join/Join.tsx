@@ -66,7 +66,10 @@ const Join: React.FC = () => {
             every bid multiplies impact.
           </p>
 
-          {/* Host */}
+          {/* Host — existing hosts can still log in from here. Self-service
+              HOST ACCOUNT CREATION is what's removed (see Login.tsx: the
+              "Create Account" link is hidden when arriving via this card,
+              since new hosts are now created only by an admin). */}
           <div className="card host" onClick={() => goLogin('host')}>
             <div className="left">
               <div className="icon-wrap">
@@ -133,5 +136,4 @@ const Join: React.FC = () => {
   );
 };
 
-export default Join; 
-
+export default Join;

@@ -3,6 +3,12 @@ import { IonPage, IonContent } from '@ionic/react';
 import { useParams, useHistory } from 'react-router-dom';
 import { Browser } from '@capacitor/browser';
 import { getPaymentSummary, markPaid, PaymentSummary } from '../../services/donorEvents';
+import {
+  getMyMessageThread,
+  getUnreadHostMessageCount,
+  replyToHost,
+  type DonorThreadMessage,
+} from '../../services/events';
 import { usePaymentGate } from '../../components/PaymentGate';
 import { Heart } from "lucide-react";
 
@@ -25,6 +31,70 @@ const PaymentPage: React.FC = () => {
   const [paidAt, setPaidAt] = useState<string>('');
   const [expandedRound, setExpandedRound] = useState<number | null>(null);
   const zeroPledgeHandledRef = useRef(false);
+
+  // ★ NEW: donor -> host message icon, same thread/API BidFlow uses. Unlike
+  // BidFlow (many early-return screens, no shared JSX root -> needed a
+  // document.body portal), this page has a single return, so the icon+modal
+  // are rendered directly in the JSX below -- inside IonPage/IonContent, so
+  // Ionic's own page show/hide handles it correctly if this view is ever
+  // kept mounted underneath another pushed page.
+  const [msgOpen,        setMsgOpen]        = useState(false);
+  const [msgThread,      setMsgThread]      = useState<DonorThreadMessage[]>([]);
+  const [msgLoading,     setMsgLoading]     = useState(false);
+  const [msgSending,     setMsgSending]     = useState(false);
+  const [msgError,       setMsgError]       = useState('');
+  const [msgDraft,       setMsgDraft]       = useState('');
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const msgThreadEndRef = useRef<HTMLDivElement | null>(null);
+
+  const loadMsgThread = async () => {
+    if (!id) return;
+    setMsgLoading(true);
+    setMsgError('');
+    try {
+      const thread = await getMyMessageThread(id);
+      setMsgThread(thread);
+      setUnreadMsgCount(0); // opening the thread also clears it server-side
+    } catch (e: any) {
+      setMsgError(e?.message ?? 'Could not load messages. Please try again.');
+    } finally {
+      setMsgLoading(false);
+    }
+  };
+
+  const openMsgWidget = () => { setMsgOpen(true); loadMsgThread(); };
+
+  const sendMsgToHost = async () => {
+    if (!id || msgSending) return;
+    const body = msgDraft.trim();
+    if (!body) return;
+    setMsgSending(true);
+    setMsgError('');
+    try {
+      await replyToHost(id, body);
+      setMsgDraft('');
+      await loadMsgThread(); // refresh so the new message + status appears in-thread
+    } catch (e: any) {
+      setMsgError(e?.message ?? 'Failed to send. Please try again.');
+    } finally {
+      setMsgSending(false);
+    }
+  };
+
+  // Poll the unread count quietly in the background (mirrors the 15s cadence
+  // BidFlow's own widget uses).
+  useEffect(() => {
+    if (!id) return;
+    getUnreadHostMessageCount(id).then(setUnreadMsgCount).catch(() => {});
+    const t = setInterval(() => {
+      getUnreadHostMessageCount(id).then(setUnreadMsgCount).catch(() => {});
+    }, 15000);
+    return () => clearInterval(t);
+  }, [id]);
+
+  useEffect(() => {
+    if (msgOpen) msgThreadEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [msgOpen, msgThread]);
 
   useEffect(() => {
     let alive = true;
@@ -174,13 +244,20 @@ const PaymentPage: React.FC = () => {
                   {summary.rounds_detail.map((r) => {
                     const hasBids = !!r.group_bids && r.group_bids.length > 0;
                     const isOpen = hasBids && expandedRound === r.round;
-                    // ★ Highest bid in this round's group — the backend already flags the
-                    // lowest bid via is_minimum, so this is the only extra rank needed to
-                    // get the full red (lowest) / orange (middle) / green (highest) scheme
-                    // used throughout the rest of the app, computed straight from the same
-                    // amounts already in group_bids.
-                    const amounts = hasBids ? r.group_bids!.map(x => Number(x.amount)).filter(a => a > 0) : [];
+                    // ★ Three-tier colour rule, computed locally from the same amounts
+                    // already in group_bids (rather than trusting the backend's per-bid
+                    // is_minimum flag, which doesn't agree with this on ties) -- same rule
+                    // BidFlow's own round-results Group Bids list uses, so both screens
+                    // colour a group identically:
+                    //   red    = the lowest bid (zero bids always land here)
+                    //   green  = the highest bid
+                    //   orange = everyone else
+                    // If every bid in the group is the SAME amount, nobody is uniquely
+                    // lowest or highest, so everyone shows orange instead of all-red.
+                    const amounts = hasBids ? r.group_bids!.map(x => Number(x.amount) || 0) : [];
+                    const minAmt = amounts.length > 0 ? Math.min(...amounts) : null;
                     const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
+                    const allTied = minAmt !== null && minAmt === maxAmt;
                     return (
                       <div className="pp-rs-round" key={r.round}>
                         <button
@@ -205,12 +282,12 @@ const PaymentPage: React.FC = () => {
                         {isOpen && (
                           <div className="pp-rs-bids">
                             {r.group_bids!.map((b, i) => {
-                              // red = lowest (matched amount, from the backend's own is_minimum),
-                              // green = highest, orange = everyone in between. "You" is shown
-                              // only via the name label below — no separate colour override.
-                              const isMin = b.is_minimum;
-                              const isMax = !isMin && maxAmt !== null && Number(b.amount) === maxAmt && amounts.length > 1;
-                              const tier = isMin ? 'min' : isMax ? 'max' : 'mid';
+                              // "You" is shown only via the name label below — no separate
+                              // colour override.
+                              const amt = Number(b.amount) || 0;
+                              const isMin = !allTied && minAmt !== null && amt === minAmt;
+                              const isMax = !allTied && !isMin && maxAmt !== null && amt === maxAmt;
+                              const tier = allTied ? 'mid' : isMin ? 'min' : isMax ? 'max' : 'mid';
                               return (
                                 <div key={i} className={`pp-rs-bid pp-rs-bid--${tier}`}>
                                   <div className={`pp-rs-avatar pp-rs-avatar--${tier}`}>
@@ -345,7 +422,136 @@ const PaymentPage: React.FC = () => {
           .pp-rs-amount--mid{ color:#C4821F; }
           .pp-rs-amount--max{ color:#16837E; }
           .pp-rs-min-badge{ background:#FDEDEE; color:#C0392B; font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; border:1px solid #EF5350; }
+          .pp-msg-spin{ border:3px solid #E5E7EB; border-top-color:#2BA7A0; border-radius:50%; animation:pp-msg-spin .8s linear infinite; }
+          @keyframes pp-msg-spin{ to{ transform:rotate(360deg); } }
         `}</style>
+
+        {/* ★ NEW: floating message-host icon + modal, same thread the donor used
+           on /bid -- kept reachable here since a donor waiting on payment may still
+           need to reach the host. Rendered directly in this page's own JSX (single
+           return, unlike BidFlow) so it lives inside IonPage/IonContent rather than
+           a document.body portal. */}
+        <button
+          onClick={openMsgWidget}
+          aria-label="Message host"
+          style={{
+            position: 'fixed', top: 8, right: 28, zIndex: 99990,
+            width: 44, height: 44, borderRadius: '50%', border: 'none',
+            background: '#2BA7A0', boxShadow: '0 4px 14px rgba(22,131,126,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M2.5 9.5C2.5 5.63 5.91 2.5 10 2.5C14.09 2.5 17.5 5.63 17.5 9.5C17.5 13.37 14.09 16.5 10 16.5C8.79 16.5 7.65 16.22 6.65 15.72L2.5 17L3.63 13.44C2.92 12.28 2.5 10.94 2.5 9.5Z" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          {unreadMsgCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
+              borderRadius: 9, background: '#E53E3E', color: '#fff', fontSize: 11, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff',
+            }}>{unreadMsgCount > 9 ? '9+' : unreadMsgCount}</span>
+          )}
+        </button>
+
+        {msgOpen && (
+          <div
+            onClick={() => setMsgOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 99991, background: 'rgba(13,56,53,0.45)',
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: '#fff', width: '100%', maxWidth: 480, borderRadius: '16px 16px 0 0',
+                display: 'flex', flexDirection: 'column', maxHeight: '80vh',
+                boxShadow: '0 -8px 32px rgba(0,0,0,0.18)',
+              }}
+            >
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '16px 16px 12px', borderBottom: '1px solid #F1F2F6',
+              }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1A1A2E' }}>Message host</h3>
+                <button
+                  onClick={() => setMsgOpen(false)}
+                  aria-label="Close"
+                  style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', lineHeight: 0 }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M4 4L14 14M14 4L4 14" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {msgLoading && msgThread.length === 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
+                    <div className="pp-msg-spin" style={{ width: 28, height: 28 }} />
+                  </div>
+                ) : msgThread.length === 0 ? (
+                  <p style={{ margin: '24px 0', textAlign: 'center', color: '#6B7280', fontSize: 13 }}>
+                    No messages yet — say hello!
+                  </p>
+                ) : (
+                  msgThread.map((m) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        alignSelf: m.from === 'donor' ? 'flex-end' : 'flex-start',
+                        maxWidth: '78%',
+                        background: m.from === 'donor' ? '#2BA7A0' : '#F1F2F6',
+                        color: m.from === 'donor' ? '#fff' : '#1A1A2E',
+                        borderRadius: 14,
+                        padding: '8px 12px',
+                      }}
+                    >
+                      <p style={{ margin: 0, fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{m.body}</p>
+                      <span style={{
+                        display: 'block', marginTop: 4, fontSize: 10,
+                        color: m.from === 'donor' ? 'rgba(255,255,255,0.75)' : '#9CA3AF',
+                        textAlign: m.from === 'donor' ? 'right' : 'left',
+                      }}>
+                        {m.from === 'donor' ? (m.status === 'seen' ? 'Seen' : m.status === 'delivered' ? 'Delivered' : 'Sent') : 'Host'}
+                      </span>
+                    </div>
+                  ))
+                )}
+                <div ref={msgThreadEndRef} />
+              </div>
+
+              {msgError && (
+                <p style={{ margin: '0 16px 8px', fontSize: 12, color: '#E53E3E' }}>{msgError}</p>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, padding: '12px 16px 16px', borderTop: '1px solid #F1F2F6' }}>
+                <input
+                  type="text"
+                  value={msgDraft}
+                  onChange={(e) => setMsgDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !msgSending) sendMsgToHost(); }}
+                  placeholder="Type a message…"
+                  style={{
+                    flex: 1, border: '1px solid #E5E7EB', borderRadius: 65, padding: '10px 16px',
+                    fontSize: 14, outline: 'none', fontFamily: 'inherit',
+                  }}
+                />
+                <button
+                  onClick={sendMsgToHost}
+                  disabled={msgSending || !msgDraft.trim()}
+                  style={{
+                    border: 'none', borderRadius: 65, padding: '0 20px', fontWeight: 600, fontSize: 14,
+                    background: '#FCB040', color: '#25201D', cursor: msgSending ? 'default' : 'pointer',
+                    opacity: msgSending || !msgDraft.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {msgSending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </IonContent>
     </IonPage>
   );

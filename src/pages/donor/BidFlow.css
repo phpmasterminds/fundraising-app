@@ -420,7 +420,8 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 20px;
+        margin-top: 25px;
+        margin-bottom: 25px;
     }
     
     .bf-back-circle {

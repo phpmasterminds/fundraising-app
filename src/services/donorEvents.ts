@@ -141,17 +141,39 @@ export async function submitBid(eventId: number, amount: number): Promise<{
   return data;
 }
 
-/** POST /donor/events/:id/join */
+/**
+ * POST /donor/events/:id/join
+ *
+ * If round 1 has already closed for this event, the backend does not join
+ * the donor immediately — it returns `pending_approval: true` instead, and
+ * the donor sits on a "waiting for host approval" screen (see getJoinStatus
+ * below) until the host approves/rejects from the Pending Join Requests
+ * sheet.
+ */
 export async function joinEvent(
   eventId: number,
   code: string,
   pseudonym: string
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; pending_approval?: boolean; message?: string }> {
 	console.log(code+'--');
   const { data } = await api.post(`/donor/events/${eventId}/join`, {
     code,
     pseudonym,
   });
+  return data;
+}
+
+export interface JoinStatus {
+  status: 'none' | 'pending' | 'approved' | 'rejected';
+}
+
+/**
+ * GET /donor/events/:id/join-status — poll while on the "waiting for host
+ * approval" screen. 'approved' means the roster row now exists and the
+ * donor can proceed into /bid exactly like a normal joiner.
+ */
+export async function getJoinStatus(eventId: number): Promise<JoinStatus> {
+  const { data } = await api.get<JoinStatus>(`/donor/events/${eventId}/join-status`);
   return data;
 }
 

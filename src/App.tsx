@@ -36,12 +36,30 @@ import DEventList   from './pages/donor/DEventList';
 import EventView    from './pages/donor/EventView';
 import BidFlow      from './pages/donor/BidFlow';
 import PaymentPage  from './pages/donor/PaymentPage';
+import AdminDashboard from './pages/admin/AdminDashboard';
 import { isAuthenticated, getRole, getUser, restoreSession, reportLastVisited, getResumePath } from './services/auth';
 import useSessionHeartbeat from './hooks/useSessionHeartbeat';
+import { createBrowserHistory } from 'history';
 
 setupIonicReact();
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') || '';
+
+/* ── Shared history instance + nav-depth tracker ──
+   Passed explicitly into IonReactRouter below so that useHistory()
+   everywhere in the app resolves to this SAME instance the listener
+   is attached to. Fixes useLockedBack's goBack() landing on a blank
+   browser history entry when the app's first navigation was a
+   REPLACE (e.g. "/" -> "/profile" on direct URL access). */
+export const appHistory = createBrowserHistory();
+
+let navDepth = 0;
+appHistory.listen((_location, action) => {
+  if (action === 'PUSH') navDepth++;
+  if (action === 'POP')  navDepth = Math.max(0, navDepth - 1);
+  // REPLACE intentionally does not change navDepth
+});
+export const getNavDepth = () => navDepth;
 
 /* Public app URL from env (e.g. https://app.getninesoft.com) */
 const APP_HOST = (() => {
@@ -81,8 +99,13 @@ const RESUME_EXCLUDED_PATHS = ['/', '/login', '/register', '/join', '/qr', '/for
    and even a different device. Falls back to the default donor/host home
    whenever there's no usable last_visited_path. Shares its validation logic
    with Login.tsx via auth.ts's getResumePath(), so there's one source of
-   truth instead of two copies that could drift apart. */
-function resumePathFor(role: 'host' | 'donor' | null): string {
+   truth instead of two copies that could drift apart.
+   Admin accounts land on /admin — added alongside host/donor, no change to
+   the existing host/donor behavior below. */
+function resumePathFor(role: 'host' | 'donor' | 'admin' | null): string {
+  if (role === 'admin') {
+    return '/admin';
+  }
   if (role === 'donor') {
     return getResumePath(getUser()) ?? '/devents';
   }
@@ -120,7 +143,7 @@ const App: React.FC = () => {
     <IonApp>
       <PaymentGateProvider>
       <EventLockProvider>
-      <IonReactRouter basename={BASE}>
+	  <IonReactRouter basename={BASE} history={appHistory}>
         <DeepLinkHandler />
         <PaymentGuard />
         <EventLockGuard />
@@ -174,6 +197,11 @@ const App: React.FC = () => {
          
           <Route path="/bid" exact>
             <AuthGuard role="donor"><BidFlow /></AuthGuard>
+          </Route>
+
+          {/* ── Admin protected routes ── */}
+          <Route path="/admin" exact>
+            <AuthGuard role="admin"><AdminDashboard /></AuthGuard>
           </Route>
 
         </IonRouterOutlet>

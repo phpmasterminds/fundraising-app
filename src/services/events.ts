@@ -264,6 +264,18 @@ export async function resumeTimer(eventId: number): Promise<{ paused: boolean }>
   return data;
 }
 
+// PATCH /api/host/events/{eventId}/donors/{groupMemberId}/reset-bid
+// Host-only "fix a mistyped bid" action — zeroes out a donor's bid for the
+// round they're currently grouped in. groupMemberId is the per-round
+// group_members.id (same id already used for messaging/moving a donor).
+export async function resetDonorBid(
+  eventId: number,
+  groupMemberId: number,
+): Promise<{ message: string; group_member_id: number; amount: number }> {
+  const { data } = await api.patch(`/host/events/${eventId}/donors/${groupMemberId}/reset-bid`);
+  return data;
+}
+
 // ── Group management ─────────────────────────────────────────────
 
 export async function moveGroupMembers(
@@ -328,6 +340,48 @@ export async function getWaitingRoom(
   eventId: number,
 ): Promise<{ count: number; donors: WaitingRoomDonor[] }> {
   const { data } = await api.get(`/host/events/${eventId}/waiting-room`);
+  return data;
+}
+
+// ── Pending join requests (donors who joined after round 1 closed) ─
+
+export interface JoinRequestDonor {
+  id:            number; // join request id
+  user_id:       number;
+  name:          string;
+  initial:       string;
+  photo_url:     string | null;
+  requested_at:  string | null;
+}
+
+/**
+ * GET /host/events/:id/join-requests
+ *
+ * Once round 1 has closed for an event, a donor joining is held as a
+ * pending EventJoinRequest instead of being added to the roster directly
+ * (see Donor\EventController::join()). This lists the ones still awaiting
+ * a decision so the host can approve or reject them.
+ */
+export async function getJoinRequests(
+  eventId: number,
+): Promise<{ count: number; requests: JoinRequestDonor[] }> {
+  const { data } = await api.get(`/host/events/${eventId}/join-requests`);
+  return data;
+}
+
+export async function approveJoinRequest(
+  eventId: number,
+  requestId: number,
+): Promise<{ message: string }> {
+  const { data } = await api.post(`/host/events/${eventId}/join-requests/${requestId}/approve`);
+  return data;
+}
+
+export async function rejectJoinRequest(
+  eventId: number,
+  requestId: number,
+): Promise<{ message: string }> {
+  const { data } = await api.post(`/host/events/${eventId}/join-requests/${requestId}/reject`);
   return data;
 }
 

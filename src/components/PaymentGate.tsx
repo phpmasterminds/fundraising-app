@@ -59,8 +59,18 @@ export const PaymentGateProvider: React.FC<{ children: React.ReactNode }> = ({ c
   );
 };
 
-const isAllowedWhileLocked = (path: string) =>
-  path === '/profile' || path.startsWith('/payment/');
+const isAllowedWhileLocked = (path: string, search: string, eventId: number) => {
+  if (path === '/profile' || path.startsWith('/payment/')) return true;
+  // Let the donor stay on /bid for the SAME event they owe on: BidFlow shows its
+  // own "Round N Complete!" screen there with a manual "View Event Summary" button
+  // (which calls goToPayment() itself). Without this, a background poll here can
+  // force-navigate to /payment/:id the instant payment_due appears, racing ahead of
+  // that button and yanking the donor off the completion screen before they see it.
+  if (path === '/bid') {
+    return Number(new URLSearchParams(search).get('id') ?? 0) === eventId;
+  }
+  return false;
+};
 
 export const PaymentGuard: React.FC = () => {
   const { pending, refresh } = usePaymentGate();
@@ -81,9 +91,9 @@ export const PaymentGuard: React.FC = () => {
   useEffect(() => {
     if (!pending || !pending.has_pending) return;
     if (!isAuthenticated() || getRole() !== 'donor') return;
-    if (isAllowedWhileLocked(location.pathname)) return;
+    if (isAllowedWhileLocked(location.pathname, location.search, pending.event_id)) return;
     history.replace(`/payment/${pending.event_id}`);
-  }, [pending, location.pathname, history]);
+  }, [pending, location.pathname, location.search, history]);
 
   return null;
 };

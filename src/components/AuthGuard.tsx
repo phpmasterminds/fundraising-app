@@ -9,6 +9,10 @@
  *   <AuthGuard role="donor">
  *     <Route path="/devents" component={DEventList} exact />
  *   </AuthGuard>
+ *
+ *   <AuthGuard role="admin">
+ *     <Route path="/admin" component={AdminDashboard} exact />
+ *   </AuthGuard>
  */
 
 import React from 'react';
@@ -33,7 +37,11 @@ const AuthGuard: React.FC<AuthGuardProps> = ({
 
   if (role && getRole() !== role) {
     // Authenticated but wrong role → send to their correct home
-    const home = getRole() === 'host' ? '/events' : '/devents';
+    const actualRole = getRole();
+    const home =
+      actualRole === 'host'  ? '/events' :
+      actualRole === 'admin' ? '/admin'  :
+      '/devents';
     return <Redirect to={home} />;
   }
 

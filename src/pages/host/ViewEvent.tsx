@@ -26,9 +26,13 @@ import {
   getUnreadDonorMessageIds,
   pauseTimer,
   resumeTimer,
+  resetDonorBid,
   getWaitingRoom,
+  getJoinRequests,
+  approveJoinRequest,
+  rejectJoinRequest,
 } from '../../services/events';
-import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage, WaitingRoomDonor } from '../../services/events';
+import type { Event, ApiGroup, ApiRound, ApiGroupRow, DonorMessage, WaitingRoomDonor, JoinRequestDonor } from '../../services/events';
 import { copyOutline, checkmarkOutline } from 'ionicons/icons';
 
 const imgBase = import.meta.env.VITE_ASSETS_URL;
@@ -190,6 +194,14 @@ const ViewEvent: React.FC = () => {
   const [waitingRoomDonors, setWaitingRoomDonors]   = useState<WaitingRoomDonor[]>([]);
   const [waitingRoomLoading, setWaitingRoomLoading] = useState(false);
 
+  // ★ NEW: Pending Join Requests — donors trying to join after round 1 has
+  // already closed for this event; each one needs an explicit host decision
+  // (see Donor\EventController::join()'s round1Closed gate).
+  const [showJoinRequests, setShowJoinRequests]     = useState(false);
+  const [joinRequests, setJoinRequests]             = useState<JoinRequestDonor[]>([]);
+  const [joinRequestsLoading, setJoinRequestsLoading] = useState(false);
+  const [joinRequestActionId, setJoinRequestActionId] = useState<number | null>(null);
+
   // ─── Config edit state ────────────────────────────────────────────────────
   const [editName, setEditName]                   = useState('');
   const [editCharityName, setEditCharityName]     = useState('');
@@ -295,6 +307,11 @@ const ViewEvent: React.FC = () => {
   const [msgSending, setMsgSending] = useState(false);
   const [msgError, setMsgError]     = useState<string | null>(null);
 
+  // ─── Reset-bid confirmation (host fixes a mistyped bid → zeroes it) ──────
+  const [resetBidConfirm, setResetBidConfirm] = useState<{ groupMemberId: number; name: string; amount: string } | null>(null);
+  const [resetBidLoading, setResetBidLoading] = useState(false);
+  const [resetBidError, setResetBidError]     = useState<string | null>(null);
+
   // Donors (by group_member_id) with an unread reply — drives the small dot
   // on each All Donors row's message icon. Polled independently of the
   // round-status poll so it works even while that donor's group is idle.
@@ -370,6 +387,26 @@ const ViewEvent: React.FC = () => {
       setMsgError(e?.response?.data?.message ?? 'Could not send message.');
     } finally {
       setMsgSending(false);
+    }
+  };
+
+  // Host confirms zeroing out a mistyped bid (see resetBidConfirm state above).
+  // Re-fetches the event afterward so the sheet, group totals, and rank
+  // colouring all reflect the new £0 amount immediately — same refresh
+  // pattern used after applyGroupSize.
+  const handleConfirmResetBid = async () => {
+    if (!resetBidConfirm || !eventId) return;
+    setResetBidLoading(true);
+    setResetBidError(null);
+    try {
+      await resetDonorBid(Number(eventId), resetBidConfirm.groupMemberId);
+      const fresh = await getEvent(Number(eventId));
+      setApiEvent(fresh);
+      setResetBidConfirm(null);
+    } catch (e: any) {
+      setResetBidError(e?.response?.data?.message ?? e?.message ?? 'Could not reset this bid.');
+    } finally {
+      setResetBidLoading(false);
     }
   };
 
@@ -532,6 +569,58 @@ const ViewEvent: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showLaunchEventConfirm, eventId]);
 
+  // ★ NEW: Pending Join Requests — donors who tried to join after round 1
+  // closed. Loaded on demand (sheet open) and also polled quietly in the
+  // background once the event is live, purely to keep the badge count on
+  // the entry-point button fresh without requiring the host to open the sheet.
+  const loadJoinRequests = async () => {
+    if (!eventId) return;
+    setJoinRequestsLoading(true);
+    try {
+      const res = await getJoinRequests(Number(eventId));
+      setJoinRequests(res.requests);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setJoinRequestsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (apiEvent?.status !== 'live') return;
+    loadJoinRequests();
+    const id = setInterval(() => { loadJoinRequests(); }, 8000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEvent?.status, eventId]);
+
+  const handleApproveJoinRequest = async (requestId: number) => {
+    if (!eventId || joinRequestActionId) return;
+    setJoinRequestActionId(requestId);
+    try {
+      await approveJoinRequest(Number(eventId), requestId);
+      setJoinRequests(prev => prev.filter(r => r.id !== requestId));
+      await refreshEvent();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setJoinRequestActionId(null);
+    }
+  };
+
+  const handleRejectJoinRequest = async (requestId: number) => {
+    if (!eventId || joinRequestActionId) return;
+    setJoinRequestActionId(requestId);
+    try {
+      await rejectJoinRequest(Number(eventId), requestId);
+      setJoinRequests(prev => prev.filter(r => r.id !== requestId));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setJoinRequestActionId(null);
+    }
+  };
+
   // ─── Host action handlers ─────────────────────────────────────────────────
   const handleStartEvent = async () => {
     if (!eventId || actionLoading) return;
@@ -647,13 +736,23 @@ const handleEndEvent = async () => {
       // or never flip even once everyone had. donors here is the exact same
       // per-round roster the group-detail sheet lists below, so it's always
       // in sync with what the host sees when they open the group.
-      const localParseAmount = (val?: string | null): number => {
-        if (!val) return 0;
-        const n = Number(String(val).replace(/[^0-9.]/g, ''));
-        return isNaN(n) ? 0 : n;
-      };
+      // localParseAmount kept (commented) rather than removed, per no-code-loss:
+      // it was only used by the old >0 filter below and is unused now that a
+      // donor's presence in the roster (bid != null) is what counts as "has bid."
+      // const localParseAmount = (val?: string | null): number => {
+      //   if (!val) return 0;
+      //   const n = Number(String(val).replace(/[^0-9.]/g, ''));
+      //   return isNaN(n) ? 0 : n;
+      // };
       const totalBidsActual = donors.length;
-      const bidsActual = donors.filter((d) => d.bid != null && localParseAmount(d.bid) > 0).length;
+      // ★ FIX (client-reported, 2026-08-28): a donor who places a genuine £0
+      // bid was not being counted toward the "X/Y bids" numerator, because this
+      // filter previously required localParseAmount(d.bid) > 0. donor.bid is only
+      // non-null once a bid has actually been submitted (see donors map above),
+      // so "has bid" should just be "bid != null" — zero-value bids still count
+      // as a submitted bid here, even though they're correctly excluded elsewhere
+      // (getDonorRankStyle, matched-amount calc) from the minimum-bid business logic.
+      const bidsActual = donors.filter((d) => d.bid != null).length;
       return {
         name: g.name, bids: bidsActual, totalBids: totalBidsActual,
         min: g.min ?? undefined, alert: g.alert, status: g.status,
@@ -1533,9 +1632,17 @@ const handleEndEvent = async () => {
     // how many donors share it, to distinguish a unique low from a tied low.
     let minAmount = Infinity;
     let minCount = 0;
+    // ★ FIX (client-reported 2026-08-30): a group with only ONE donor total
+    // was being marked red ("the lowest") purely because a lone bid is
+    // trivially its own minimum. With nobody else to compare against there
+    // is no "lowest bid drags the group down" situation, so a solo bidder
+    // should read as green, same as any other donor who isn't the low bid.
+    let singleBidderGroup = false;
     if (allBidsIn) {
       const amounts = group.donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
-      if (amounts.length) {
+      if (amounts.length === 1) {
+        singleBidderGroup = true;
+      } else if (amounts.length) {
         minAmount = Math.min(...amounts);
         minCount = amounts.filter(a => a === minAmount).length;
       }
@@ -1549,9 +1656,13 @@ const handleEndEvent = async () => {
       // While the group is still waiting on bids, all dots stay white/hollow
       // regardless of individual bid status.
       if (hasBid && allBidsIn) {
-        const amt = parseAmount(d.bid);
-        if (amt === minAmount) color = minCount > 1 ? DOT_ORANGE : DOT_RED;
-        else color = DOT_GREEN;
+        if (singleBidderGroup) {
+          color = DOT_GREEN;
+        } else {
+          const amt = parseAmount(d.bid);
+          if (amt === minAmount) color = minCount > 1 ? DOT_ORANGE : DOT_RED;
+          else color = DOT_GREEN;
+        }
       }
       // Border keyed off the final colour (not hasBid) — a donor who bid but
       // is still showing white (group hasn't reached capacity yet) needs the
@@ -1583,6 +1694,10 @@ const handleEndEvent = async () => {
     const bidCount = donors.filter(d => d.bid != null && parseAmount(d.bid) > 0).length;
     if (totalDonors === 0 || bidCount < totalDonors) return {};
     const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    // ★ FIX (client-reported 2026-08-30): see identical note in renderGroupDots
+    // above — a group with only one donor (one bid total) has nothing to be
+    // "the lowest" relative to, so it should render green, not red.
+    if (amounts.length === 1) return { background: '#EAF6F5', borderRadius: 12, border: '2px solid #2BA7A0' };
     const min = Math.min(...amounts);
     const minCount = amounts.filter(a => a === min).length;
     // The lowest bid sets what the whole group pays, so it's flagged red
@@ -1963,23 +2078,99 @@ const handleCopy = async (text: string, field: string) => {
             </div>
           )}
 
-          {/* ── NEW: After round closes — show Proposed Group Allocations button ── */}
+          {/* ── NEW: After round closes — show Proposed Group Allocations button ──
+              ★ Pending Join Requests shares this row when there are any. */}
           {roundJustClosed && (
-            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={openPGA}>
-              Proposed Group Allocations →{waitingSecs > 0 ? ` (${formatTimer(waitingSecs)})` : ''}
+            <div style={{ display: 'flex', gap: 12, width: '100%', alignSelf: 'stretch' }}>
+              <div
+                className="ve-launch-btn ve-launch-btn--arrow"
+                style={joinRequests.length > 0
+                  ? { flex: 1, opacity: actionLoading ? 0.6 : 1, padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }
+                  : { flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                onClick={openPGA}
+              >
+                {joinRequests.length > 0 ? 'Group Allocations →' : 'Proposed Group Allocations →'}{waitingSecs > 0 ? ` (${formatTimer(waitingSecs)})` : ''}
+              </div>
+
+              {joinRequests.length > 0 && (
+                <div
+                  className="ve-launch-btn ve-launch-btn--arrow"
+                  style={{ flex: 1, background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }}
+                  onClick={() => { setShowJoinRequests(true); loadJoinRequests(); }}
+                >
+                  Requests ({joinRequests.length}) →
+                </div>
+              )}
             </div>
           )}
 
+          {/* ── NEW: Launch Round button ──
+              ★ Pending Join Requests shares this row when there are any. */}
           {apiEvent?.status === 'live' && !hasOpenRound && !allRoundsDone && !roundJustClosed && (
-            <div className="ve-launch-btn ve-launch-btn--arrow" style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(true); }}>
-              {actionLoading ? 'Starting…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
+            <div style={{ display: 'flex', gap: 12, width: '100%', alignSelf: 'stretch' }}>
+              <div
+                className="ve-launch-btn ve-launch-btn--arrow"
+                style={joinRequests.length > 0
+                  ? { flex: 1, background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1, padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }
+                  : { flex: 1, background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', opacity: actionLoading ? 0.6 : 1 }}
+                onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(true); }}
+              >
+                {actionLoading ? 'Starting…' : joinRequests.length > 0 ? `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1}` : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
+              </div>
+
+              {joinRequests.length > 0 && (
+                <div
+                  className="ve-launch-btn ve-launch-btn--arrow"
+                  style={{ flex: 1, background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }}
+                  onClick={() => { setShowJoinRequests(true); loadJoinRequests(); }}
+                >
+                  Requests ({joinRequests.length}) →
+                </div>
+              )}
             </div>
           )}
 
           {apiEvent?.status === 'live' && hasOpenRound && (
-            <div className="ve-call-time-btn" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowCallTimeConfirm(true); }}>
-              <span className="ve-call-time-icon">■</span>
-              {actionLoading ? 'Ending…' : timerSecs > 0 ? `Call Time (${formatTimer(timerSecs)})` : 'Call Time (End Round)'}
+            <div style={{ display: 'flex', gap: 12, width: '100%', alignSelf: 'stretch' }}>
+              <div
+                className="ve-call-time-btn"
+                style={joinRequests.length > 0
+                  ? { flex: 1, opacity: actionLoading ? 0.6 : 1, padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }
+                  : { flex: 1, opacity: actionLoading ? 0.6 : 1 }}
+                onClick={() => { if (!actionLoading) setShowCallTimeConfirm(true); }}
+              >
+                <span className="ve-call-time-icon">■</span>
+                {actionLoading
+                  ? 'Ending…'
+                  : timerSecs > 0
+                    ? `Call Time (${formatTimer(timerSecs)})`
+                    : (joinRequests.length > 0 ? 'Call Time' : 'Call Time (End Round)')}
+              </div>
+
+              {/* ★ NEW: Pending Join Requests — donors who tried to join after
+                  round 1 closed. Sits alongside Call Time when both are visible. */}
+              {joinRequests.length > 0 && (
+                <div
+                  className="ve-launch-btn ve-launch-btn--arrow"
+                  style={{ flex: 1, background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', padding: '16px 8px', fontSize: 15, whiteSpace: 'nowrap' }}
+                  onClick={() => { setShowJoinRequests(true); loadJoinRequests(); }}
+                >
+                  Requests ({joinRequests.length}) →
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ★ NEW: Pending Join Requests, full-width — only reached in the rare
+              state where none of the three primary action buttons above are
+              rendered (e.g. all rounds done but event not yet ended). */}
+          {apiEvent?.status === 'live' && !hasOpenRound && !roundJustClosed && allRoundsDone && joinRequests.length > 0 && (
+            <div
+              className="ve-launch-btn ve-launch-btn--arrow"
+              style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)' }}
+              onClick={() => { setShowJoinRequests(true); loadJoinRequests(); }}
+            >
+              Pending Join Requests ({joinRequests.length}) →
             </div>
           )}
 
@@ -2044,6 +2235,66 @@ const handleCopy = async (text: string, field: string) => {
                 >
                   {actionLoading ? 'Launching…' : '🚀 Launch Event'}
                 </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ══ Pending Join Requests ══
+            Donors who tried to join after round 1 closed for this event
+            (Donor\EventController::join()'s round1Closed gate). Approve runs
+            the exact same roster-add logic a normal join uses; reject just
+            marks the request resolved. */}
+        {showJoinRequests && (
+          <>
+            <div className="ve-backdrop" onClick={() => { if (!joinRequestActionId) setShowJoinRequests(false); }} />
+            <div className="ve-sheet">
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">Pending Join Requests{joinRequests.length > 0 ? ` (${joinRequests.length})` : ''}</h3>
+              </div>
+              <p style={{ margin: '4px 24px 14px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                Round 1 has already been called, so these donors need your approval before they can join.
+              </p>
+
+              <div className="ve-donor-list" style={{ maxHeight: '48vh', overflowY: 'auto', padding: '0 20px' }}>
+                {joinRequestsLoading && joinRequests.length === 0 ? (
+                  <div className="ve-no-groups">Loading…</div>
+                ) : joinRequests.length === 0 ? (
+                  <div className="ve-no-groups">No pending join requests</div>
+                ) : (
+                  joinRequests.map((r, i) => (
+                    <div key={r.id} className="ve-donor-row">
+                      <div className="ve-donor-avatar" style={{ background: COLORS[i % COLORS.length] }}>
+                        {<AvatarContent photoUrl={r.photo_url} initial={r.initial} />}
+                      </div>
+                      <div className="ve-donor-info">
+                        <span className="ve-donor-name">{r.name}</span>
+                        {r.requested_at && <span className="ve-donor-sub">Requested {r.requested_at}</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <div
+                          className="ve-sheet-close"
+                          style={{ margin: 0, padding: '6px 14px', opacity: joinRequestActionId ? 0.6 : 1 }}
+                          onClick={() => { if (!joinRequestActionId) handleRejectJoinRequest(r.id); }}
+                        >
+                          {joinRequestActionId === r.id ? '…' : 'Reject'}
+                        </div>
+                        <div
+                          className="ve-call-time-btn"
+                          style={{ margin: 0, padding: '6px 14px', opacity: joinRequestActionId ? 0.6 : 1 }}
+                          onClick={() => { if (!joinRequestActionId) handleApproveJoinRequest(r.id); }}
+                        >
+                          {joinRequestActionId === r.id ? '…' : 'Approve'}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div style={{ padding: '14px 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ marginTop: 0 }} onClick={() => { if (!joinRequestActionId) setShowJoinRequests(false); }}>Close</div>
               </div>
             </div>
           </>
@@ -2386,6 +2637,36 @@ const handleCopy = async (text: string, field: string) => {
           </>
         ), document.body)}
 
+        {/* ══ Reset Bid Confirmation — host tapped a mistyped bid in the live
+            Group sheet (client-reported fix-a-typo flow). Portal + high
+            z-index, same pattern as showLaunchRoundConfirm, so it always
+            paints above the Group sheet that triggered it. ══ */}
+        {resetBidConfirm && createPortal((
+          <div style={{ position: 'fixed', inset: 0, zIndex: 20000 }}>
+            <div className="ve-backdrop" style={{ zIndex: 20000 }} onClick={() => { if (!resetBidLoading) { setResetBidConfirm(null); setResetBidError(null); } }} />
+            <div className="ve-sheet" style={{ zIndex: 20001 }}>
+              <div className="ve-sheet-handle" />
+              <div className="ve-sheet-header">
+                <h3 className="ve-sheet-title">Reset this bid to £0?</h3>
+              </div>
+              <p style={{ margin: '4px 24px 6px', color: '#6B7280', fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+                {resetBidConfirm.name}'s bid of {resetBidConfirm.amount} will be set to £0. This can't be undone.
+              </p>
+              {resetBidError && <div style={{ color: '#E53E3E', fontSize: 13, textAlign: 'center', padding: '0 24px 6px' }}>{resetBidError}</div>}
+              <div style={{ display: 'flex', gap: 12, padding: '12px 20px 8px' }}>
+                <div className="ve-sheet-close" style={{ flex: 1, marginTop: 0 }} onClick={() => { if (!resetBidLoading) { setResetBidConfirm(null); setResetBidError(null); } }}>Cancel</div>
+                <div
+                  className="ve-call-time-btn"
+                  style={{ flex: 1, background: '#E53E3E', opacity: resetBidLoading ? 0.6 : 1 }}
+                  onClick={handleConfirmResetBid}
+                >
+                  {resetBidLoading ? 'Resetting…' : 'Reset to £0'}
+                </div>
+              </div>
+            </div>
+          </div>
+        ), document.body)}
+
         {/* ══ Live Summary Sheet ══ */}
         {showLiveSummary && (
           <>
@@ -2589,7 +2870,34 @@ const handleCopy = async (text: string, field: string) => {
                         {unreadDonorIds.has(donor.groupMemberId) && <span className="ve-donor-msg-dot" />}
                       </button>
                     ) : null}
-                    <div className="ve-donor-right">{donor.bid ? <span className="ve-donor-bid">{donor.bid}</span> : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}</div>
+                    <div className="ve-donor-right" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {donor.bid ? (
+                        <span className="ve-donor-bid">{donor.bid}</span>
+                      ) : donor.status === 'no-bid' ? <span className="ve-donor-bidding">No Bid</span> : <span className="ve-donor-bidding">Bidding...</span>}
+                      {donor.bid && donor.groupMemberId && parseAmount(donor.bid) > 0 ? (
+                        // Client-reported: host needs to fix a mistyped bid without
+                        // going through the donor. This pill opens a confirmation
+                        // before resetting the bid to £0 — see resetBidConfirm
+                        // state / handleConfirmResetBid. A text pill (design-system
+                        // border-radius: 65px) reads crisper at this size than a
+                        // tiny vector icon, which anti-aliased blurry.
+                        <button
+                          onClick={() => setResetBidConfirm({ groupMemberId: donor.groupMemberId!, name: donor.name, amount: donor.bid! })}
+                          aria-label="Reset bid to £0"
+                          title="Reset bid to £0"
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            height: 22, padding: '0 8px', borderRadius: 65,
+                            border: '1px solid #E53E3E', background: '#FEF2F2',
+                            color: '#E53E3E', fontFamily: 'Outfit, sans-serif',
+                            fontSize: 11, fontWeight: 600, lineHeight: 1,
+                            cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                    </div>
 						{/*<span className="ve-donor-remove">⊗</span>*/}
                   </div>
                 ))}

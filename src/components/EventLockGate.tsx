@@ -3,6 +3,7 @@ import { useLocation, useHistory } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { isAuthenticated, getRole } from '../services/auth';
 import { getActiveEvent, ActiveEventLock } from '../services/donorEvents';
+import { getNavDepth } from '../App'; // adjust relative path to your file location
 
 /**
  * App-wide single-event lock.
@@ -177,7 +178,7 @@ export function useLockedBack(fallback: string = '/devents') {
       history.replace(lockedPathFor(lock.event_id));
       return;
     }
-    if (history.length > 1) {
+    if (getNavDepth() > 0) {
       history.goBack();
       return;
     }

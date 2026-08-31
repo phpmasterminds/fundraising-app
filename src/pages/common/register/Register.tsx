@@ -21,8 +21,12 @@ const Register: React.FC = () => {
   const fromQR    = params.get('from') === 'qr';
   const eventCode = params.get('code') ?? '';
 
-  // Determine role
-  const role: UserRole = fromQR ? 'donor' : (getPendingRole() as UserRole) ?? 'donor';
+  // Determine role — host self-registration has been removed. Hosts are now
+  // created only by an admin (see AdminController::createHost /
+  // AdminDashboard.tsx). Public /register is donor-only from here on.
+  // Old logic kept commented out, not deleted, per convention:
+  // const role: UserRole = fromQR ? 'donor' : (getPendingRole() as UserRole) ?? 'donor';
+  const role: UserRole = 'donor';
   console.log(role + '--');
 
   // ─── Form state ───────────────────────────────────────────────────────────
@@ -141,7 +145,7 @@ const Register: React.FC = () => {
         return;
       }
 
-      // Normal flow
+      // Normal flow — role is always 'donor' now (see note above)
       if (role === 'host') {
         router.push('/events', 'root', 'replace');
       } else {

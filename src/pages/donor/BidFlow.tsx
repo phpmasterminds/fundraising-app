@@ -1,5 +1,5 @@
 import { IonPage, IonContent } from '@ionic/react';
-import { useIonRouter } from '@ionic/react';
+import { useIonRouter, useIonViewWillEnter, useIonViewDidLeave, useIonViewWillLeave } from '@ionic/react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -164,7 +164,46 @@ const BidFlow: React.FC = () => {
   const [msgError,       setMsgError]       = useState('');
   const [msgDraft,       setMsgDraft]       = useState('');
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
-  const msgRootRef = useRef<Root | null>(null);
+  // ══════════════════════════════════════════════════════════════════════
+  // ★ SUPERSEDED — the whole document.body-portal approach below (msgRootRef,
+  // the mount-once effect, the visibility-guard effect, and every safety-net
+  // layered on top of it: msgPageActive + its lifecycle hooks, msgRecheckTick,
+  // the ionRouteDidChange listener, onBidRoute) is left in place commented out
+  // rather than deleted, per the no-code-loss rule.
+  //
+  // Root cause of the "icon leaks onto other pages" bug: this widget was
+  // portaled to `document.body`, i.e. rendered OUTSIDE Ionic's own ion-page
+  // DOM tree entirely. Ionic hides an inactive page via a CSS class + 
+  // aria-hidden on that page's own container — it has no way to reach into
+  // and hide a sibling node sitting outside <ion-app> altogether. Every fix
+  // attempted above tried to detect "we've navigated away" and manually call
+  // render(null), but all of them depend on THIS component re-rendering while
+  // hidden, which Ionic does not guarantee will happen promptly (or at all,
+  // in some navigation paths) for a kept-alive stacked page.
+  //
+  // Fix: stop portaling. Render the widget as ordinary JSX inside BidFlow's
+  // own screens instead (see msgWidgetNode below, inserted into each screen's
+  // return the same way confirmBidModal/thanksBidModal/quitModal already are).
+  // That places its DOM node INSIDE the ion-page Ionic already knows how to
+  // hide, so it disappears the instant Ionic hides the page — no guessing,
+  // no polling, no race, exactly like PaymentPage's own icon already works.
+  //
+  // const msgRootRef = useRef<Root | null>(null);
+  // const [msgPageActive, setMsgPageActive] = useState(true);
+  // useIonViewWillEnter(() => setMsgPageActive(true));
+  // useIonViewDidLeave(() => setMsgPageActive(false));
+  // useIonViewWillLeave(() => setMsgPageActive(false));
+  // const [msgRecheckTick, forceMsgRecheck] = useState(0);
+  // useEffect(() => {
+  //   const t = setInterval(() => forceMsgRecheck(n => n + 1), 2000);
+  //   return () => clearInterval(t);
+  // }, []);
+  // useEffect(() => {
+  //   const onIonRouteChange = () => forceMsgRecheck(n => n + 1);
+  //   document.addEventListener('ionRouteDidChange', onIonRouteChange);
+  //   return () => document.removeEventListener('ionRouteDidChange', onIonRouteChange);
+  // }, []);
+  // ══════════════════════════════════════════════════════════════════════
 
   const loadMsgThread = useCallback(async () => {
     if (!stateEventId) return;
@@ -203,37 +242,74 @@ const BidFlow: React.FC = () => {
     }
   }, [stateEventId, msgSending, msgDraft, loadMsgThread]);
 
-  // Mount the standalone root once, on unmount tear it down.
-  useEffect(() => {
-    const el = document.createElement('div');
-    el.setAttribute('data-peerfund-msg-widget', '1');
-    document.body.appendChild(el);
-    msgRootRef.current = createRoot(el);
-    return () => {
-      msgRootRef.current?.unmount();
-      el.remove();
-    };
-  }, []);
+  // const msgRootRef2 = useRef<Root | null>(null); // (superseded, see block above)
+  //
+  // // Mount the standalone root once, on unmount tear it down.
+  // useEffect(() => {
+  //   const el = document.createElement('div');
+  //   el.setAttribute('data-peerfund-msg-widget', '1');
+  //   document.body.appendChild(el);
+  //   msgRootRef.current = createRoot(el);
+  //   return () => {
+  //     msgRootRef.current?.unmount();
+  //     el.remove();
+  //   };
+  // }, []);
+  //
+  // // Re-render the widget whenever anything it displays changes.
+  // // ★ Gate on the ACTUAL browser location, not just the Ionic view lifecycle
+  // // above: useIonViewDidLeave depends on IonRouterOutlet's transition animation
+  // // completing, which doesn't fire reliably in every navigation path here. When
+  // // it doesn't, msgPageActive stays stuck true and this document.body-portaled
+  // // widget keeps rendering (and, being a later DOM sibling of #root, painting on
+  // // top of and intercepting clicks meant for) PaymentPage's own message icon
+  // // after the donor navigates to /payment/:id -- the exact "icon shows twice,
+  // // clicking does nothing until reload" symptom. location.pathname updates
+  // // synchronously with the real URL regardless of animation timing, so it's a
+  // // reliable belt-and-braces check alongside msgPageActive.
+  // const onBidRoute = location.pathname === '/bid';
+  // useEffect(() => {
+  //   if (!stateEventId) return; // nothing to message about without an event
+  //   const rawPathIsBid = typeof window !== 'undefined' && window.location.pathname === '/bid';
+  //   if (!msgPageActive || !onBidRoute || !rawPathIsBid) { msgRootRef.current?.render(null); return; }
+  //   msgRootRef.current?.render(
+  //     <MsgHostWidget
+  //       open={msgOpen}
+  //       unread={unreadMsgCount}
+  //       thread={msgThread}
+  //       loading={msgLoading}
+  //       sending={msgSending}
+  //       error={msgError}
+  //       draft={msgDraft}
+  //       onOpen={openMsgWidget}
+  //       onClose={() => setMsgOpen(false)}
+  //       onDraftChange={setMsgDraft}
+  //       onSend={sendMsgToHost}
+  //     />
+  //   );
+  // }, [stateEventId, msgPageActive, onBidRoute, msgRecheckTick, msgOpen, unreadMsgCount, msgThread, msgLoading, msgSending, msgError, msgDraft, openMsgWidget, sendMsgToHost]);
 
-  // Re-render the widget whenever anything it displays changes.
-  useEffect(() => {
-    if (!stateEventId) return; // nothing to message about without an event
-    msgRootRef.current?.render(
-      <MsgHostWidget
-        open={msgOpen}
-        unread={unreadMsgCount}
-        thread={msgThread}
-        loading={msgLoading}
-        sending={msgSending}
-        error={msgError}
-        draft={msgDraft}
-        onOpen={openMsgWidget}
-        onClose={() => setMsgOpen(false)}
-        onDraftChange={setMsgDraft}
-        onSend={sendMsgToHost}
-      />
-    );
-  }, [stateEventId, msgOpen, unreadMsgCount, msgThread, msgLoading, msgSending, msgError, msgDraft, openMsgWidget, sendMsgToHost]);
+  // ★ NEW: rendered inline (see usage in each screen's return below) instead of
+  // portaled to document.body — this is the actual fix for the leak. Same
+  // component, same props as the old portal render call above; only WHERE it's
+  // mounted has changed. `stateEventId` gates it exactly as the old effect did
+  // ("nothing to message about without an event").
+  const msgWidgetNode = stateEventId ? (
+    <MsgHostWidget
+      open={msgOpen}
+      unread={unreadMsgCount}
+      thread={msgThread}
+      loading={msgLoading}
+      sending={msgSending}
+      error={msgError}
+      draft={msgDraft}
+      onOpen={openMsgWidget}
+      onClose={() => setMsgOpen(false)}
+      onDraftChange={setMsgDraft}
+      onSend={sendMsgToHost}
+    />
+  ) : null;
+
 
   // Poll the unread count quietly in the background (mirrors the 15s cadence
   // the global DonorMessageListener already uses elsewhere in the app).
@@ -261,6 +337,10 @@ const BidFlow: React.FC = () => {
   const [roundSecsLeft,      setRoundSecsLeft]      = useState<number | null>(null);
   const [waitingSecsLeft,    setWaitingSecsLeft]    = useState<number | null>(null);
   const [hostPaused,         setHostPaused]         = useState(false); // host paused the PGA waiting timer
+  // Host ended the event early (before all rounds were played). Distinct from
+  // currentRound >= totalRounds (natural finish) so the round-results screen can
+  // still show "View Event Summary" instead of waiting on a round that is never coming.
+  const [eventEndedEarly,    setEventEndedEarly]    = useState(false);
   const [roundCloseSecsLeft, setRoundCloseSecsLeft] = useState<number | null>(null); // countdown on round-results
   const [roundEnding,        setRoundEnding]        = useState(false); // timer hit 0, waiting for backend to confirm closed
 
@@ -288,6 +368,12 @@ const BidFlow: React.FC = () => {
 
   // 0. Reset ALL per-event state when navigating to a different event (browser back → new event)
   useEffect(() => {
+    // Sync eventId to the new route's event — without this, eventId stays frozen
+    // at whatever event this component instance first mounted with (Ionic/React
+    // router reuses the page instance rather than remounting), so every fetch
+    // and poll below kept hitting the OLD event's endpoints even after the URL
+    // and stateEventId had already moved on to the new one.
+    setEventId(stateEventId);
     // Clear every piece of state that is seeded from the previous event
     setScreen('starting');
     setChecking(true);
@@ -344,6 +430,7 @@ const BidFlow: React.FC = () => {
         // "View Event Summary" button, instead of jumping straight to payment-intro.
         // Payment summary is still prefetched in the background so it's ready instantly
         // once the donor taps through.
+        setEventEndedEarly(true); // host may have ended before all rounds were played
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
         getCurrentRound(stateEventId).then(d => {
           setRoundData(d);
@@ -419,6 +506,7 @@ const BidFlow: React.FC = () => {
     getRoundStatus(eventId).then(res => {
       if (res.event_status === 'finished' || res.round_status === 'finished') {
         // ★ Event already finished — show "Round N Complete!" first, not payment directly.
+        setEventEndedEarly(true); // host may have ended before all rounds were played
         getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
         getCurrentRound(eventId).then(d => {
           setRoundData(d);
@@ -485,6 +573,7 @@ const BidFlow: React.FC = () => {
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
           // ★ Show "Round N Complete!" first, not payment directly.
+          setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           try {
             const d = await getCurrentRound(eventId);
@@ -526,6 +615,11 @@ const BidFlow: React.FC = () => {
             setRoundSecsLeft(res.seconds_left);
           }
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
+          // ★ A fresh round means any "Thanks for bidding!" modal from the PREVIOUS
+          // round is now stale — without this it can stay open (thanksOpen only ever
+          // got reset by the donor tapping Done/backdrop) and reappear on the new
+          // round's bid screen the moment it mounts.
+          setThanksOpen(false);
           setScreen('confirm-bid');
           return;
         }
@@ -587,6 +681,7 @@ const BidFlow: React.FC = () => {
               goToPayment();
             } else if (res.event_status === 'finished' || res.round_status === 'finished') {
               // ★ Show "Round N Complete!" first, not payment directly.
+              setEventEndedEarly(true); // host may have ended before all rounds were played
               getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
               getCurrentRound(eventId).then(d => {
                 setRoundData(d);
@@ -636,6 +731,7 @@ const BidFlow: React.FC = () => {
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current); setRoundEnding(false);
           // ★ Show "Round N Complete!" first, not payment directly.
+          setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           try {
             const d = await getCurrentRound(eventId);
@@ -730,6 +826,7 @@ const BidFlow: React.FC = () => {
         // asked to move on. Now just prefetch the summary quietly and stay put.
         if (res.round_status === 'finished' || res.event_status === 'finished') {
           clearInterval(pollRef.current);
+          setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
         }
@@ -759,6 +856,7 @@ const BidFlow: React.FC = () => {
           setHostPaused(false);
           setRoundEnding(false);
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
+          setThanksOpen(false); // stale modal from the previous round shouldn't carry over — see the matching comment in Effect 3b above
           setScreen('confirm-bid');
           return;
         }
@@ -827,6 +925,7 @@ const BidFlow: React.FC = () => {
             setRoundSecsLeft(res.seconds_left);
           }
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
+          setThanksOpen(false); // stale modal from the previous round shouldn't carry over — see the matching comment in Effect 3b above
           setScreen('confirm-bid');
           return;
         }
@@ -877,6 +976,7 @@ const BidFlow: React.FC = () => {
         // ★ Stay on "Round N Complete!" — see the matching comment in Effect 6 above.
         if (res.event_status === 'finished' || res.round_status === 'finished') {
           clearInterval(pollRef.current);
+          setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
         }
@@ -900,6 +1000,7 @@ const BidFlow: React.FC = () => {
           setHostPaused(false);
           setRoundEnding(false);
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
+          setThanksOpen(false); // stale modal from the previous round shouldn't carry over — see the matching comment in Effect 3b above
           setScreen('confirm-bid');
           return;
         }
@@ -944,10 +1045,12 @@ const BidFlow: React.FC = () => {
             setRoundSecsLeft(res.seconds_left);
           }
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
+          setThanksOpen(false); // stale modal from the previous round shouldn't carry over — see the matching comment in Effect 3b above
           setScreen('confirm-bid');
         } else if (res.round_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
           // ★ Show "Round N Complete!" first, not payment directly.
+          setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           try {
             const d = await getCurrentRound(eventId);
@@ -1006,6 +1109,44 @@ const BidFlow: React.FC = () => {
     if (screen === 'round-results') return startConfetti() ?? undefined;
   }, [screen, startConfetti]);
 
+  // 9b. Keep the "no lower re-bid" floor in sync with the server's my_bid whenever
+  // roundData refreshes. The floor (peerfund_bidplaced_<event>_<round>, read in
+  // handlePlaceBid) is a client-side cache written on every successful submit, and
+  // it's meant to mirror this donor's actual last-recorded bid for the round. Two
+  // host actions can change that recorded bid out from under the cache:
+  //   • reset-bid zeroes the amount but keeps the bid "placed" (my_bid becomes 0,
+  //     not null) — a plain "no bid" check misses this and leaves the floor stuck
+  //     at the pre-reset amount, blocking a corrected lower bid like £50.
+  //   • (any future host-side bid edit would hit the same gap.)
+  // Rather than special-case "no bid," always resync the floor to whatever the
+  // server currently reports: clear it when there's truly no bid on record, and
+  // otherwise overwrite it with the server's my_bid. In the normal self-submit
+  // flow this is a no-op (the server already reflects what the donor just sent
+  // before the next poll runs), so it only actually changes behaviour when a
+  // host has altered the bid out of band.
+  useEffect(() => {
+    if (!roundData || roundData.status === 'waiting') return;
+    const serverBidPlaced = (roundData as any)?.my_bid_placed !== undefined
+      ? !!(roundData as any).my_bid_placed
+      : (roundData?.my_bid !== null && roundData?.my_bid !== undefined);
+    const floorKey = `peerfund_bidplaced_${stateEventId}_${currentRound}`;
+    if (!serverBidPlaced) {
+      if (localStorage.getItem(floorKey) !== null) {
+        localStorage.removeItem(floorKey);
+      }
+      if (locallyBidRound === currentRound) {
+        setLocallyBidRound(null);
+      }
+    } else if (roundData?.my_bid !== null && roundData?.my_bid !== undefined) {
+      const serverAmt = Number(roundData.my_bid);
+      const cachedRaw = localStorage.getItem(floorKey);
+      const cachedAmt = cachedRaw !== null ? parseInt(cachedRaw, 10) : null;
+      if (!isNaN(serverAmt) && cachedAmt !== serverAmt) {
+        localStorage.setItem(floorKey, String(serverAmt));
+      }
+    }
+  }, [roundData, stateEventId, currentRound]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ══════ HANDLERS ══════ */
 
   const handlePlaceBid = async () => {
@@ -1022,7 +1163,8 @@ const BidFlow: React.FC = () => {
     if (prevPlacedRaw !== null) {
       const prevPlacedAmt = parseInt(prevPlacedRaw, 10);
       if (!isNaN(prevPlacedAmt) && bidAmount < prevPlacedAmt) {
-        setSubmitError(`You already placed £${fmtAmount(prevPlacedAmt)} this round — you can only bid £${fmtAmount(prevPlacedAmt)} or higher.`);
+        setSubmitError(`You’ve already bid £${fmtAmount(prevPlacedAmt)} this round — your next bid must be £${fmtAmount(prevPlacedAmt)} or higher.`);
+
         return;
       }
     }
@@ -1350,6 +1492,7 @@ const confirmQuit = async () => {
 
   if (checking) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white">
+      {msgWidgetNode}
       <div className="bf-loading-screen">
         <div className="bf-loading-icon-wrap">
           <div className="bf-loading-spin" />
@@ -1363,6 +1506,7 @@ const confirmQuit = async () => {
   /* ══════ S0: Quit ══════ */
   if (hasQuit) return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', gap:18, padding:'0 28px', textAlign:'center' }}>
         <div style={{ width:88, height:88, borderRadius:'50%', background:'#F5F6F8', display:'flex', alignItems:'center', justifyContent:'center' }}>
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
@@ -1382,6 +1526,7 @@ const confirmQuit = async () => {
   /* ══════ S1: Starting ══════ */
   if (screen === 'starting') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div className="bf-s1">
         <div className="bf-logo">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -1410,6 +1555,7 @@ const confirmQuit = async () => {
   /* ══════ S2: Bid Entry ══════ */
   if (screen === 'bid-entry') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div className="bf-s2">
         <EventCard timer={roundTimerDisplay} timerOrange={roundTimerOrange} roundLabel={`Round ${currentRound}`} eventName={eventName} />
         {committedBanner}
@@ -1453,10 +1599,11 @@ const confirmQuit = async () => {
   /* ══════ S3: Confirm Bid ══════ */
   if (screen === 'confirm-bid') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       {confirmBidModal}
       {thanksBidModal}
       <div className="bf-s3">
-        <div className="bf-s3-nav">
+        <div className="bf-s3-nav" style={{ marginTop: 14 }}>
           {/* Hidden while backIsNoOp: on this screen useLockedBack() would just
               replace() to the route already on screen (see backIsNoOp above) --
               a button with no visible effect. Kept in code, not deleted, so it
@@ -1532,6 +1679,7 @@ const confirmQuit = async () => {
   /* ══════ S4: Submitted ══════ */
   if (screen === 'submitted') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div className="bf-submitted">
         <div className="bf-check-ring">
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -1550,6 +1698,7 @@ const confirmQuit = async () => {
 
   if (screen === 'round-results') return (
     <IonPage><IonContent fullscreen className="bf-page" scrollY>
+      {msgWidgetNode}
       <canvas ref={canvasRef} className="bf-canvas" />
       <div className="bf-results-wrap">
         <div className="bf-hero">
@@ -1624,31 +1773,44 @@ const confirmQuit = async () => {
                   };
                 })
               : roundBids;
-            // Binary colour rule (Slide 11) — compared within this group only:
-            //   red   = the lowest NON-ZERO bid (ties all shown red), and every zero bid
-            //   green = everyone else
-            // No middle/neutral tier — matches GroupCard's youRankColor exactly, so a
-            // donor sees the same rank convention here as during active bidding.
-            const amounts = bidsToShow.map((b: any) => b.amount).filter((a: number) => a > 0);
-            const minAmt = amounts.length > 0 ? Math.min(...amounts) : -1;
+            // ★ Three-tier colour rule — same convention as PaymentPage's Round
+            // Summaries (Group Bids), so a donor sees identical colouring on both
+            // screens instead of this screen's old two-tone red/green scheme:
+            //   red    = the lowest bid (zero bids always land here)
+            //   green  = the highest bid
+            //   orange = everyone else
+            // Special case: if every bid in the group is the SAME amount (min===max),
+            // nobody is uniquely lowest or highest, so everyone shows orange instead of
+            // all-red or all-green.
+            const amounts = bidsToShow.map((b: any) => Number(b.amount) || 0);
+            const minAmt = amounts.length > 0 ? Math.min(...amounts) : null;
+            const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
+            // Same colour palette PaymentPage's .pp-rs-bid--*/.pp-rs-avatar--* CSS uses,
+            // reproduced here as inline styles since this screen has no shared CSS file.
+            const TIER_STYLES: Record<'min' | 'mid' | 'max', { avatar: React.CSSProperties; row: React.CSSProperties }> = {
+              min: { avatar: { background: '#FBD7D9', color: '#C0392B', border: '1.5px solid #EF5350' }, row: { background: '#FDEDEE', border: '1.5px solid #EF5350' } },
+              mid: { avatar: { background: '#FFE8D4', color: '#C4821F', border: '1.5px solid #FCB040' }, row: { background: '#FFF5EC', border: '1.5px solid #FCB040' } },
+              max: { avatar: { background: '#C8EDE9', color: '#16837E', border: '1.5px solid #2BA7A0' }, row: { background: '#EAF6F5', border: '1.5px solid #2BA7A0' } },
+            };
             return (
               <div className="bf-group-bids-list">
                 {bidsToShow.map((b: any, i: number) => {
                   // ★ Same colour gate as GroupCard: colours only once this donor has
                   // placed a bid this round, and only when the group has >1 donor.
                   const colorEnabled = myBidPlaced && bidsToShow.length > 1;
-                  const noBidsYet = minAmt < 0 || !colorEnabled;
-                  const isRed = !noBidsYet && (b.amount <= 0 || b.amount === minAmt);
-                  const avatarStyle: React.CSSProperties = noBidsYet
-                      ? {}
-                      : isRed
-                        ? { background: '#EF5350', color: '#fff', border: '1.5px solid #EF5350' }
-                        : { background: '#2BA7A0', color: '#fff', border: '1.5px solid #2BA7A0' };
-                  const rowStyle: React.CSSProperties = noBidsYet
-                      ? {}
-                      : isRed
-                        ? { background: '#FEF2F2', border: '2px solid #D77F5A' }
-                        : { background: '#EAF6F5', border: '2px solid #2BA7A0' };
+                  const noBidsYet = minAmt === null || !colorEnabled;
+                  const allTied = !noBidsYet && minAmt === maxAmt;
+                  const tier: 'min' | 'mid' | 'max' | null = noBidsYet
+                    ? null
+                    : allTied
+                      ? 'mid'
+                      : b.amount === minAmt
+                        ? 'min'
+                        : b.amount === maxAmt
+                          ? 'max'
+                          : 'mid';
+                  const avatarStyle: React.CSSProperties = tier ? TIER_STYLES[tier].avatar : {};
+                  const rowStyle: React.CSSProperties = tier ? TIER_STYLES[tier].row : {};
                   return (
                     <div key={i} className="bf-bid-row" style={rowStyle}>
                       <div className="bf-bid-avatar" style={avatarStyle}>{b.initial}</div>
@@ -1668,7 +1830,7 @@ const confirmQuit = async () => {
           </div>
           <span className="bf-cumul-val">£{fmtAmount(displayCumulative)}</span>
         </div>
-        {currentRound >= totalRounds ? (
+        {(currentRound >= totalRounds || eventEndedEarly) ? (
           <>
             {/* Payment amount card removed here — all payment info now lives on
                /payment/:id, not in BidFlow. Kept as a comment (not deleted) in case
@@ -1726,6 +1888,7 @@ const confirmQuit = async () => {
   /* ══════ S6: Waiting Between Rounds ══════ */
   if (screen === 'waiting') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', gap:20, padding:'0 24px' }}>
         <div className="bf-clock-ring"><div className="bf-clock-circle">
           <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
@@ -1784,6 +1947,7 @@ const confirmQuit = async () => {
   /* ══════ S7: Payment Intro ══════ */
   if (screen === 'payment-intro') return (
     <IonPage><IonContent fullscreen scrollY={true} className="bf-page bf-white">
+      {msgWidgetNode}
       <div className="bf-pay-intro">
         <div className="bf-pay-intro-nav">
           <button className="bf-back-circle" onClick={() => setScreen('round-results')}>
@@ -1841,6 +2005,7 @@ const confirmQuit = async () => {
   /* ══════ S8: Payment Form ══════ */
   if (screen === 'payment-form') return (
     <IonPage><IonContent fullscreen className="bf-page bf-white" scrollY>
+      {msgWidgetNode}
       <div className="bf-pay-form">
         <div className="bf-pay-form-nav">
           <button className="bf-back-circle" onClick={() => setScreen('payment-intro')}>
@@ -1913,6 +2078,7 @@ const confirmQuit = async () => {
   /* ══════ S9: Receipt ══════ */
   return (
     <IonPage><IonContent fullscreen scrollY={true} className="bf-page bf-white">
+      {msgWidgetNode}
       <div className="bf-receipt">
         <div className="bf-receipt-hero">
           <div className="bf-receipt-check">
@@ -1992,10 +2158,12 @@ const MsgHostWidget: React.FC<MsgHostWidgetProps> = ({
         onClick={onOpen}
         aria-label="Message host"
         style={{
-          // right: 28 (not 16) clears the desktop browser's vertical scrollbar,
-          // which otherwise overlaps this button's top-right corner on web —
-          // no-op on mobile/Capacitor where there's no scrollbar to clear.
-          position: 'fixed', top: 16, right: 28, zIndex: 99990,
+          // ★ Fixed positioning removed per request -- no longer pinned to the
+          // viewport/floating over page content. position: relative is kept only
+          // so the unread-count badge below (position: absolute) still anchors to
+          // this button's own box rather than the next positioned ancestor up the
+          // DOM tree. zIndex kept in case it still renders above adjacent content.
+		  position: 'fixed', top: 8, right: 28, zIndex: 99990,
           width: 44, height: 44, borderRadius: '50%', border: 'none',
           background: '#2BA7A0', boxShadow: '0 4px 14px rgba(22,131,126,0.35)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',

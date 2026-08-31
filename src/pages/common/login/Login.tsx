@@ -2,7 +2,7 @@ import { IonPage, IonContent } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { login, getResumePath } from '../../../services/auth';
+import { login, getResumePath, getPendingRole } from '../../../services/auth';
 import type { ApiError } from '../../../services/api';
 import useAuthRedirect from '../../../hooks/useAuthRedirect';
 import './Login.css';
@@ -19,6 +19,12 @@ const Login: React.FC = () => {
   const params    = new URLSearchParams(location.search);
   const fromQR    = params.get('from') === 'qr';
   const eventCode = params.get('code') ?? '';
+
+  // Host self-registration has been removed — new hosts are created only by
+  // an admin (see AdminController::createHost). When the visitor arrived via
+  // Join's "Host" card (which sets pending_role via setRole()), hide the
+  // "Create Account" link below so there's no path to self-register as host.
+  const isHostContext = getPendingRole() === 'host';
 
   // ─── Form state ───────────────────────────────────────────────────────────
   const [email, setEmail]       = useState('');
@@ -69,7 +75,9 @@ const Login: React.FC = () => {
       // Normal flow — route by role. Donors resume their last visited page
       // (persisted server-side — see AuthController::updateLastVisited) when
       // there is one; falls back to the default list otherwise.
-      if (user.role === 'host') {
+      if (user.role === 'admin') {
+        router.push('/admin', 'root', 'replace');
+      } else if (user.role === 'host') {
         router.push('/events', 'root', 'replace');
       } else {
         const resume = getResumePath(user);
@@ -176,17 +184,21 @@ const Login: React.FC = () => {
               {loading ? 'Signing in…' : 'Log in'}
             </button>
 
-            {/* Carry code forward if in QR flow */}
-            <div
-              className="create"
-              onClick={() =>
-                fromQR && eventCode
-                  ? router.push(`/register?from=qr&code=${eventCode}`)
-                  : router.push('/register')
-              }
-            >
-              Create Account
-            </div>
+            {/* Carry code forward if in QR flow. Hidden entirely for the host
+                context — see isHostContext above — since new hosts are only
+                created by an admin now. */}
+            {!isHostContext && (
+              <div
+                className="create"
+                onClick={() =>
+                  fromQR && eventCode
+                    ? router.push(`/register?from=qr&code=${eventCode}`)
+                    : router.push('/register')
+                }
+              >
+                Create Account
+              </div>
+            )}
           </div>
 
         </div>

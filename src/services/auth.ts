@@ -10,7 +10,7 @@ import { Preferences } from '@capacitor/preferences';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type UserRole = 'host' | 'donor';
+export type UserRole = 'host' | 'donor' | 'admin';
 
 export interface AuthUser {
   id: number;

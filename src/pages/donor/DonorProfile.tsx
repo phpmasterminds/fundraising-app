@@ -7,7 +7,7 @@ import { useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import './DonorProfile.css';
 import DonorHeader from '../../components/DonorHeader';
-import { joinEvent, getDonorEventDetail } from '../../services/donorEvents';
+import { joinEvent, getDonorEventDetail, getJoinStatus } from '../../services/donorEvents';
 import { updateProfile, changePassword } from '../../services/profileService';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
 import { clearSession } from '../../services/auth'; // adjust relative path
@@ -80,6 +80,38 @@ const DonorProfile: React.FC = () => {
     getDonorEventDetail(eventId).then(data => setEventInfo(data)).catch(() => {});
   }, [isJoin]);
 
+  // ── Pending host approval (round 1 already closed) ────────────
+  // Set when joinEvent() comes back with pending_approval: true. While this
+  // is true the form is replaced with a waiting screen that polls
+  // join-status every 5s until the host approves or rejects the request.
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [joinRejected, setJoinRejected]       = useState(false);
+
+  useEffect(() => {
+    if (!pendingApproval) return;
+    const eventId = Number(localStorage.getItem('event_id'));
+    if (!eventId) return;
+
+    const poll = async () => {
+      try {
+        const res = await getJoinStatus(eventId);
+        if (res.status === 'approved') {
+          router.push(`/bid?id=${eventId}`, 'root');
+        } else if (res.status === 'rejected') {
+          setPendingApproval(false);
+          setJoinRejected(true);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingApproval]);
+
   // ── Save state ────────────────────────────────────
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -136,7 +168,12 @@ const handleEmailInfoClick = () => {
         if (eventId && displayName.trim()) {
           try {
             const code = localStorage.getItem('event_code') ?? '';
-            await joinEvent(eventId, code, displayName.trim());
+            const res = await joinEvent(eventId, code, displayName.trim());
+            if (res?.pending_approval) {
+              setSaving(false);
+              setPendingApproval(true);
+              return; // stay here — the polling effect above takes over
+            }
           } catch (err: any) {
             // 409 = this donor is already taking part in a different event.
             // The API refused the join, so sending them to /bid for THIS event
@@ -230,7 +267,7 @@ const handleEmailInfoClick = () => {
           />
 
           {/* Subtitle (JOIN ONLY) */}
-          {isJoin && (
+          {isJoin && !pendingApproval && !joinRejected && (
             <>
               <h2 className="title">Join the Event</h2>
               <p className="subtitle">
@@ -241,7 +278,31 @@ const handleEmailInfoClick = () => {
             </>
           )}
 
+          {/* ── Waiting for host approval (round 1 already closed) ── */}
+          {isJoin && pendingApproval && (
+            <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+              <h2 className="title">Waiting for host approval</h2>
+              <p className="subtitle" style={{ marginTop: 8 }}>
+                Round 1 has already been called for this event, so the host
+                needs to approve your join request first. This page will move
+                on automatically once they respond.
+              </p>
+            </div>
+          )}
+
+          {/* ── Join request rejected ── */}
+          {isJoin && joinRejected && (
+            <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+              <h2 className="title">Request not approved</h2>
+              <p className="subtitle" style={{ marginTop: 8 }}>
+                The host didn't approve your join request for this event.
+                Please contact the host, or try again later.
+              </p>
+            </div>
+          )}
+
           {/* ── Avatar — same pattern as HostProfile ── */}
+          {!(isJoin && (pendingApproval || joinRejected)) && (
           <div className="profile">
             <label htmlFor="dp-file">
               <div className="avatar">
@@ -276,8 +337,10 @@ const handleEmailInfoClick = () => {
               </div>
             </label>
           </div>
+          )}
 
           {/* ── Form ── */}
+          {!(isJoin && (pendingApproval || joinRejected)) && (
           <div className="form">
 
             {/* Full Name */}
@@ -354,10 +417,12 @@ const handleEmailInfoClick = () => {
             {saveOk    && <p className="msg msg--ok">Profile saved!</p>}
 
           </div>
+          )}
 
         </div>
 
         {/* ── Bottom ── */}
+        {!(isJoin && (pendingApproval || joinRejected)) && (
         <div className="bottom">
           <button
             className={`btn ${isJoin ? 'join' : 'save'}`}
@@ -370,6 +435,7 @@ const handleEmailInfoClick = () => {
             }
           </button>
         </div>
+        )}
 
         {/* ── Password Modal ── */}
         {showPwModal && (
