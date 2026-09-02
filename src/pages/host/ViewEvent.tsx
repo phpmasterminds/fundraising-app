@@ -1639,7 +1639,16 @@ const handleEndEvent = async () => {
     // should read as green, same as any other donor who isn't the low bid.
     let singleBidderGroup = false;
     if (allBidsIn) {
-      const amounts = group.donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+      // ★ FIX (client-reported 2026-08-31): a placed £0 bid is a REAL bid, not
+      // an absence of one — it was being stripped out by the old '> 0' filter,
+      // which silently dropped it from the min-amount pool entirely (so a £0
+      // bid could never register as the unique lowest, and the other bids in
+      // the group would incorrectly tie for "lowest" amongst themselves).
+      // Filter on d.bid != null (has the donor bid at all) instead, then map
+      // to the numeric amount so £0 is preserved as a real, comparable value.
+      const amounts = group.donors.filter(d => d.bid != null).map(d => parseAmount(d.bid));
+      // Old (stale) filter — kept for reference, not deleted:
+      // const amounts = group.donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
       if (amounts.length === 1) {
         singleBidderGroup = true;
       } else if (amounts.length) {
@@ -1649,7 +1658,13 @@ const handleEndEvent = async () => {
     }
 
     return donors.map((d, i) => {
-      const hasBid = d.bid != null && parseAmount(d.bid) > 0;
+      // ★ FIX (client-reported 2026-08-31): a placed £0 bid must count as
+      // "has bid" so it can be coloured red (unique lowest) below — the old
+      // '> 0' check treated £0 the same as "hasn't bid yet" and left the dot
+      // white forever, even once every donor in the group had actually bid.
+      const hasBid = d.bid != null;
+      // Old (stale) check — kept for reference, not deleted:
+      // const hasBid = d.bid != null && parseAmount(d.bid) > 0;
       let color = DOT_WHITE;
       // Host request: don't colour any dot (not even teal) until every donor
       // in the group has bid — only then reveal the red/orange/green standing.
@@ -1679,10 +1694,21 @@ const handleEndEvent = async () => {
     });
   };
 
-  // Rank donors inside a group by their bid. Only bids > 0 are ranked.
+  // Rank donors inside a group by their bid. A donor who hasn't bid at all
+  // (bid == null) is excluded; a placed bid of £0 IS ranked (see fix below).
   const getDonorRankStyle = (donor: Donor, donors: Donor[]): React.CSSProperties => {
+    // ★ FIX (client-reported 2026-08-31): a placed £0 bid is a real bid, not
+    // an absence of one. The old 'amt <= 0' check here (and the '> 0' filters
+    // further down) treated £0 the same as "never bid", so a £0 bidder's row
+    // stayed unstyled/neutral instead of being flagged red as the unique
+    // lowest, and the other donors' amounts-pool excluded the £0 bid entirely
+    // when computing the group minimum. Gate on donor.bid == null instead —
+    // that's the only case meaning "hasn't bid yet".
+    if (donor.bid == null) return {};
     const amt = parseAmount(donor.bid);
-    if (amt <= 0) return {};
+    // Old (stale) check — kept for reference, not deleted:
+    // const amt = parseAmount(donor.bid);
+    // if (amt <= 0) return {};
     // ★ FIX (client-reported): don't colour-rank a bid until EVERY donor in
     // the group has actually bid — same allBidsIn gate the dots use in
     // renderGroupDots. Without this, the very first bid to land in a group
@@ -1691,9 +1717,13 @@ const handleEndEvent = async () => {
     // the dots). Leave it unstyled/neutral until the round is actually
     // decided for this group.
     const totalDonors = donors.length;
-    const bidCount = donors.filter(d => d.bid != null && parseAmount(d.bid) > 0).length;
+    const bidCount = donors.filter(d => d.bid != null).length;
+    // Old (stale) count — kept for reference, not deleted:
+    // const bidCount = donors.filter(d => d.bid != null && parseAmount(d.bid) > 0).length;
     if (totalDonors === 0 || bidCount < totalDonors) return {};
-    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    const amounts = donors.filter(d => d.bid != null).map(d => parseAmount(d.bid));
+    // Old (stale) filter — kept for reference, not deleted:
+    // const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
     // ★ FIX (client-reported 2026-08-30): see identical note in renderGroupDots
     // above — a group with only one donor (one bid total) has nothing to be
     // "the lowest" relative to, so it should render green, not red.
@@ -1715,12 +1745,21 @@ const handleEndEvent = async () => {
   // HistoryDonor is a distinct shape from Donor — logic is intentionally
   // identical so the host sees one consistent convention everywhere.
   const getHistoryDonorRankStyle = (donor: HistoryDonor, donors: HistoryDonor[]): React.CSSProperties => {
-    const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
+    // ★ FIX (client-reported 2026-08-31): same £0-bid fix as getDonorRankStyle
+    // above — a placed £0 bid is a real bid and must stay in the amounts pool
+    // (filter on d.bid != null, not '> 0'), and a £0 bidder's own row must not
+    // be excluded by 'amt <= 0' below, or this history view disagrees with the
+    // live Round view on which donor was the unique lowest.
+    const amounts = donors.filter(d => d.bid != null).map(d => parseAmount(d.bid));
+    // Old (stale) filter — kept for reference, not deleted:
+    // const amounts = donors.map(d => parseAmount(d.bid)).filter(a => a > 0);
     if (amounts.length === 0) return {};
     const min = Math.min(...amounts);
     const minCount = amounts.filter(a => a === min).length;
+    if (donor.bid == null) return {};
     const amt = parseAmount(donor.bid);
-    if (amt <= 0) return {};
+    // Old (stale) check — kept for reference, not deleted:
+    // if (amt <= 0) return {};
     // Same fix and rationale as getDonorRankStyle above, applied to the
     // Round Overview / Summary history drill-down.
     if (amt === min) return minCount > 1

@@ -425,13 +425,27 @@ const BidFlow: React.FC = () => {
         // a receipt here (all payment info lives on /payment/:id now).
         setHasPaid(true);
         goToPayment();
-      } else if (res.event_status === 'finished' || res.round_status === 'finished') {
-        // ★ Show "Round N Complete!" (round-results) first, with its own manual
-        // "View Event Summary" button, instead of jumping straight to payment-intro.
-        // Payment summary is still prefetched in the background so it's ready instantly
-        // once the donor taps through.
+      } else if (res.event_status === 'finished') {
+        // ★ Event genuinely over (host ended it early via "End Event", or the last
+        // configured round has fully concluded). Show "Round N Complete!"
+        // (round-results) first, with its own manual "View Event Summary" button,
+        // instead of jumping straight to payment-intro. Payment summary is still
+        // prefetched in the background so it's ready instantly once the donor taps
+        // through.
         setEventEndedEarly(true); // host may have ended before all rounds were played
         getPaymentSummary(stateEventId).then(d => setPaymentData(d)).catch(() => {});
+        getCurrentRound(stateEventId).then(d => {
+          setRoundData(d);
+          setCurrentRound(prev => Math.max(prev, d.round_number));
+        }).catch(() => {});
+        setGroupBidsOpen(false);
+        setScreen('round-results');
+      } else if (res.round_status === 'finished') {
+        // ★ round_status is per-ROUND and fires 'finished' after EVERY round closes,
+        // not just the last one — it must NOT be treated as the event having ended
+        // (that was the bug: donors saw "View Event Summary" after round 1 of 4).
+        // Just show this round's results normally; whether "View Event Summary"
+        // appears there is decided by currentRound >= totalRounds, not by this flag.
         getCurrentRound(stateEventId).then(d => {
           setRoundData(d);
           setCurrentRound(prev => Math.max(prev, d.round_number));
@@ -504,10 +518,21 @@ const BidFlow: React.FC = () => {
     clearInterval(roundTimerRef.current);
     // First check if event is still active
     getRoundStatus(eventId).then(res => {
-      if (res.event_status === 'finished' || res.round_status === 'finished') {
+      if (res.event_status === 'finished') {
         // ★ Event already finished — show "Round N Complete!" first, not payment directly.
         setEventEndedEarly(true); // host may have ended before all rounds were played
         getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+        getCurrentRound(eventId).then(d => {
+          setRoundData(d);
+          setCurrentRound(prev => Math.max(prev, d.round_number));
+        }).catch(() => {});
+        setGroupBidsOpen(false);
+        setScreen('round-results');
+        return;
+      }
+      if (res.round_status === 'finished') {
+        // ★ Per-round terminal state, not the whole event — see Effect 1's comment.
+        // Show this round's results without flagging eventEndedEarly.
         getCurrentRound(eventId).then(d => {
           setRoundData(d);
           setCurrentRound(prev => Math.max(prev, d.round_number));
@@ -570,11 +595,24 @@ const BidFlow: React.FC = () => {
           goToPayment();
           return;
         }
-        if (res.event_status === 'finished' || res.round_status === 'finished') {
+        if (res.event_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
           // ★ Show "Round N Complete!" first, not payment directly.
           setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
+          return;
+        }
+
+        if (res.round_status === 'finished') {
+          // ★ Per-round terminal state, not the whole event — see Effect 1's comment.
+          clearInterval(pollRef.current); clearInterval(roundTimerRef.current);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -679,10 +717,18 @@ const BidFlow: React.FC = () => {
             if (res.payment_status === 'paid') {
               // Hand off to the payment page (all payment info lives on /payment/:id now).
               goToPayment();
-            } else if (res.event_status === 'finished' || res.round_status === 'finished') {
+            } else if (res.event_status === 'finished') {
               // ★ Show "Round N Complete!" first, not payment directly.
               setEventEndedEarly(true); // host may have ended before all rounds were played
               getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+              getCurrentRound(eventId).then(d => {
+                setRoundData(d);
+                setCurrentRound(prev => Math.max(prev, d.round_number));
+              }).catch(() => {});
+              setGroupBidsOpen(false);
+              setScreen('round-results');
+            } else if (res.round_status === 'finished') {
+              // ★ Per-round terminal state, not the whole event — see Effect 1's comment.
               getCurrentRound(eventId).then(d => {
                 setRoundData(d);
                 setCurrentRound(prev => Math.max(prev, d.round_number));
@@ -728,11 +774,22 @@ const BidFlow: React.FC = () => {
           clearInterval(pollRef.current); setRoundEnding(false);
           goToPayment(); return;
         }
-        if (res.event_status === 'finished' || res.round_status === 'finished') {
+        if (res.event_status === 'finished') {
           clearInterval(pollRef.current); setRoundEnding(false);
           // ★ Show "Round N Complete!" first, not payment directly.
           setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results'); return;
+        }
+        if (res.round_status === 'finished') {
+          // ★ Per-round terminal state, not the whole event — see Effect 1's comment.
+          clearInterval(pollRef.current); setRoundEnding(false);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -824,11 +881,20 @@ const BidFlow: React.FC = () => {
         // currentRound >= totalRounds, further down). Previously this jumped straight
         // to payment-intro here, skipping that screen even though the donor hadn't
         // asked to move on. Now just prefetch the summary quietly and stay put.
-        if (res.round_status === 'finished' || res.event_status === 'finished') {
+        if (res.event_status === 'finished') {
           clearInterval(pollRef.current);
           setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
+        }
+
+        // ★ round_status is per-ROUND and fires 'finished' after EVERY round closes,
+        // not just the last one — must NOT be treated as the event having ended (that
+        // was the bug: donors saw "View Event Summary" after round 1 of 4). The donor
+        // is already sitting on "Round N Complete!" here, so just prefetch the summary
+        // quietly and keep polling for the next round to open or the event to finish.
+        if (res.round_status === 'finished') {
+          getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
         }
 
         // Next round opened → transition donor to bid-entry
@@ -869,7 +935,11 @@ const BidFlow: React.FC = () => {
         // screen, so a 3rd donor who bids afterwards never appears for the first two.
         // The 'finished' check above still moves us to payment once the event ends, so
         // here the round is only ever open / closing — safe to refresh.
-        if (currentRound >= totalRounds) {
+        // ★ totalRounds guard: while it's still unresolved (0 — the fetch in Effect 1
+        // hasn't come back yet, a race that's most visible right after a fresh page
+        // load), never treat this as the last round just because currentRound >= 0
+        // is trivially true. Wait for the real value before deciding.
+        if (totalRounds > 0 && currentRound >= totalRounds) {
           if (res.round_status === 'open' || res.round_status === 'closed' || res.round_status === 'grouping') {
             try {
               const d = await getCurrentRound(eventId);
@@ -967,19 +1037,24 @@ const BidFlow: React.FC = () => {
     if (screen !== 'round-results') return;
     // Fire when: waiting countdown finished (=== 0), OR last round with no waiting period (=== null)
     if (waitingSecsLeft !== null && waitingSecsLeft !== 0) return;
-    if (waitingSecsLeft === null && currentRound < totalRounds) return; // not last round yet, Effect 6 handles it
+    // ★ totalRounds guard (see Effect 6's comment): while totalRounds is still 0
+    // (unresolved), never fall through as if this were the last round.
+    if (waitingSecsLeft === null && (totalRounds === 0 || currentRound < totalRounds)) return; // not last round yet, Effect 6 handles it
     // Aggressive poll until next round opens or event finishes
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
         const res = await getRoundStatus(eventId);
         // ★ Stay on "Round N Complete!" — see the matching comment in Effect 6 above.
-        if (res.event_status === 'finished' || res.round_status === 'finished') {
+        if (res.event_status === 'finished') {
           clearInterval(pollRef.current);
           setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
           return;
         }
+        // ★ round_status is per-ROUND ('finished' fires after every round closes, not
+        // just the last one) — must NOT be treated as the event having ended. Just
+        // keep polling for the next round to open or the event to actually finish.
         if (res.round_status === 'open' && res.current_round > currentRound) {
           clearInterval(pollRef.current);
           // Fetch first, apply everything together once the data is in hand — see the
@@ -1047,11 +1122,24 @@ const BidFlow: React.FC = () => {
           setBidAmount(0); setInputVal('0'); // fresh round -> default £0, not the previous round's bid
           setThanksOpen(false); // stale modal from the previous round shouldn't carry over — see the matching comment in Effect 3b above
           setScreen('confirm-bid');
-        } else if (res.round_status === 'finished') {
+        } else if (res.event_status === 'finished') {
           clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
           // ★ Show "Round N Complete!" first, not payment directly.
           setEventEndedEarly(true); // host may have ended before all rounds were played
           getPaymentSummary(eventId).then(d => setPaymentData(d)).catch(() => {});
+          try {
+            const d = await getCurrentRound(eventId);
+            setRoundData(d);
+            setCurrentRound(prev => Math.max(prev, d.round_number));
+          } catch (_) {}
+          setGroupBidsOpen(false);
+          setScreen('round-results');
+        } else if (res.round_status === 'finished') {
+          // ★ Per-round terminal state, not the whole event — see Effect 1's comment.
+          // (Shouldn't normally be seen from the "waiting" screen, but handle it the
+          // same way as the other polls for consistency instead of assuming the event
+          // has ended.)
+          clearInterval(pollRef.current); clearInterval(waitTimerRef.current);
           try {
             const d = await getCurrentRound(eventId);
             setRoundData(d);
@@ -1249,7 +1337,10 @@ const confirmQuit = async () => {
 
   const roundTimerDisplay = roundSecsLeft !== null && roundSecsLeft > 0 ? fmt(roundSecsLeft) : '00:00';
   const roundTimerOrange  = roundSecsLeft !== null && roundSecsLeft > 0;
-  const isLastRound       = currentRound >= totalRounds;
+  // ★ totalRounds guard: 0 means the event-meta fetch hasn't resolved yet (a race
+  // with getRoundStatus in Effect 1 — see that effect's comments), so never treat
+  // that as "this must be the last round".
+  const isLastRound       = totalRounds > 0 && currentRound >= totalRounds;
   // When backend returns the NEXT round during 'waiting' status, all current-round fields are null.
   // Fall back to all_round_bids for the just-completed round (currentRound) to keep results visible.
   const isWaitingStatus   = roundData?.status === 'waiting';
@@ -1774,19 +1865,20 @@ const confirmQuit = async () => {
                 })
               : roundBids;
             // ★ Three-tier colour rule — same convention as PaymentPage's Round
-            // Summaries (Group Bids), so a donor sees identical colouring on both
-            // screens instead of this screen's old two-tone red/green scheme:
-            //   red    = the lowest bid (zero bids always land here)
-            //   green  = the highest bid
-            //   orange = everyone else
-            // Special case: if every bid in the group is the SAME amount (min===max),
-            // nobody is uniquely lowest or highest, so everyone shows orange instead of
-            // all-red or all-green.
+            // Summaries (Group Bids) and as youRankColor() above, so a donor sees
+            // identical colouring on every screen:
+            //   red    = the UNIQUE lowest bid
+            //   orange = a TIED lowest bid (2+ donors share the lowest amount —
+            //            this also naturally covers the "everyone bid the same"
+            //            case, since then minCount === group size)
+            //   green  = everyone else (not at the lowest amount)
             const amounts = bidsToShow.map((b: any) => Number(b.amount) || 0);
             const minAmt = amounts.length > 0 ? Math.min(...amounts) : null;
-            const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
+            const minCount = minAmt !== null ? amounts.filter((a: number) => a === minAmt).length : 0;
             // Same colour palette PaymentPage's .pp-rs-bid--*/.pp-rs-avatar--* CSS uses,
             // reproduced here as inline styles since this screen has no shared CSS file.
+            // Keys kept as 'min' | 'mid' | 'max' (mapping to red | orange | green) so the
+            // palette below doesn't need renaming.
             const TIER_STYLES: Record<'min' | 'mid' | 'max', { avatar: React.CSSProperties; row: React.CSSProperties }> = {
               min: { avatar: { background: '#FBD7D9', color: '#C0392B', border: '1.5px solid #EF5350' }, row: { background: '#FDEDEE', border: '1.5px solid #EF5350' } },
               mid: { avatar: { background: '#FFE8D4', color: '#C4821F', border: '1.5px solid #FCB040' }, row: { background: '#FFF5EC', border: '1.5px solid #FCB040' } },
@@ -1799,16 +1891,13 @@ const confirmQuit = async () => {
                   // placed a bid this round, and only when the group has >1 donor.
                   const colorEnabled = myBidPlaced && bidsToShow.length > 1;
                   const noBidsYet = minAmt === null || !colorEnabled;
-                  const allTied = !noBidsYet && minAmt === maxAmt;
                   const tier: 'min' | 'mid' | 'max' | null = noBidsYet
                     ? null
-                    : allTied
-                      ? 'mid'
-                      : b.amount === minAmt
-                        ? 'min'
-                        : b.amount === maxAmt
-                          ? 'max'
-                          : 'mid';
+                    : b.amount !== minAmt
+                      ? 'max'                       // green — not the lowest bid
+                      : minCount > 1
+                        ? 'mid'                      // orange — tied lowest
+                        : 'min';                     // red — unique lowest
                   const avatarStyle: React.CSSProperties = tier ? TIER_STYLES[tier].avatar : {};
                   const rowStyle: React.CSSProperties = tier ? TIER_STYLES[tier].row : {};
                   return (
@@ -1830,7 +1919,7 @@ const confirmQuit = async () => {
           </div>
           <span className="bf-cumul-val">£{fmtAmount(displayCumulative)}</span>
         </div>
-        {(currentRound >= totalRounds || eventEndedEarly) ? (
+        {((totalRounds > 0 && currentRound >= totalRounds) || eventEndedEarly) ? (
           <>
             {/* Payment amount card removed here — all payment info now lives on
                /payment/:id, not in BidFlow. Kept as a comment (not deleted) in case

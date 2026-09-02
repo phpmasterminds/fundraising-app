@@ -247,17 +247,16 @@ const PaymentPage: React.FC = () => {
                     // ★ Three-tier colour rule, computed locally from the same amounts
                     // already in group_bids (rather than trusting the backend's per-bid
                     // is_minimum flag, which doesn't agree with this on ties) -- same rule
-                    // BidFlow's own round-results Group Bids list uses, so both screens
-                    // colour a group identically:
-                    //   red    = the lowest bid (zero bids always land here)
-                    //   green  = the highest bid
-                    //   orange = everyone else
-                    // If every bid in the group is the SAME amount, nobody is uniquely
-                    // lowest or highest, so everyone shows orange instead of all-red.
+                    // BidFlow's own round-results Group Bids list (and youRankColor) use,
+                    // so every screen colours a group identically:
+                    //   red    = the UNIQUE lowest bid
+                    //   orange = a TIED lowest bid (2+ donors share the lowest amount —
+                    //            this also covers the "everyone bid the same" case, since
+                    //            then minCount === group size)
+                    //   green  = everyone else (not at the lowest amount)
                     const amounts = hasBids ? r.group_bids!.map(x => Number(x.amount) || 0) : [];
                     const minAmt = amounts.length > 0 ? Math.min(...amounts) : null;
-                    const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
-                    const allTied = minAmt !== null && minAmt === maxAmt;
+                    const minCount = minAmt !== null ? amounts.filter(a => a === minAmt).length : 0;
                     return (
                       <div className="pp-rs-round" key={r.round}>
                         <button
@@ -285,9 +284,10 @@ const PaymentPage: React.FC = () => {
                               // "You" is shown only via the name label below — no separate
                               // colour override.
                               const amt = Number(b.amount) || 0;
-                              const isMin = !allTied && minAmt !== null && amt === minAmt;
-                              const isMax = !allTied && !isMin && maxAmt !== null && amt === maxAmt;
-                              const tier = allTied ? 'mid' : isMin ? 'min' : isMax ? 'max' : 'mid';
+                              // isMin/badge now reflect ANY bid at the lowest amount (tied
+                              // or unique) — only the colour tier distinguishes the two.
+                              const isMin = minAmt !== null && amt === minAmt;
+                              const tier = !isMin ? 'max' /* green */ : minCount > 1 ? 'mid' /* orange */ : 'min' /* red */;
                               return (
                                 <div key={i} className={`pp-rs-bid pp-rs-bid--${tier}`}>
                                   <div className={`pp-rs-avatar pp-rs-avatar--${tier}`}>
