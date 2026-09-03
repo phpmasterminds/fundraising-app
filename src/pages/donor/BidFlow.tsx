@@ -1231,6 +1231,11 @@ const BidFlow: React.FC = () => {
       const cachedAmt = cachedRaw !== null ? parseInt(cachedRaw, 10) : null;
       if (!isNaN(serverAmt) && cachedAmt !== serverAmt) {
         localStorage.setItem(floorKey, String(serverAmt));
+        // The recorded amount moved without the donor typing anything (e.g. a host
+        // “Reset” back to £0) — reflect the new amount on the bid screen too, not just
+        // in the floor cache, so the input the donor sees matches what the server has.
+        setBidAmount(serverAmt);
+        setInputVal(String(serverAmt));
       }
     }
   }, [roundData, stateEventId, currentRound]); // eslint-disable-line react-hooks/exhaustive-deps

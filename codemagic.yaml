@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     integrations:
-      app_store_connect: codemagic_api_key   # name you'll give your API key in Codemagic Team settings
+      app_store_connect: onehive   # name you'll give your API key in Codemagic Team settings
     environment:
       ios_signing:
         distribution_type: app_store         # use ad_hoc for direct device testing without App Store

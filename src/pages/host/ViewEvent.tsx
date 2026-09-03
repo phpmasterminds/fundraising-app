@@ -2283,11 +2283,21 @@ const handleCopy = async (text: string, field: string) => {
             Donors who tried to join after round 1 closed for this event
             (Donor\EventController::join()'s round1Closed gate). Approve runs
             the exact same roster-add logic a normal join uses; reject just
-            marks the request resolved. */}
-        {showJoinRequests && (
-          <>
-            <div className="ve-backdrop" onClick={() => { if (!joinRequestActionId) setShowJoinRequests(false); }} />
-            <div className="ve-sheet">
+            marks the request resolved.
+            NOTE: rendered via createPortal straight to document.body with an
+            explicit high z-index — same fix as showLaunchRoundConfirm below.
+            This sheet used to be mounted inline here, before the PGA sheet's
+            JSX further down. The PGA sheet's "Requests" button also sets
+            showJoinRequests(true), but the PGA sheet shares the same
+            .ve-backdrop/.ve-sheet classes and is rendered LATER in the DOM,
+            so it painted on top and hid this sheet completely -> clicking
+            "Requests" from inside the PGA sheet looked like it "did nothing".
+            The portal + z-index guarantees this modal is always the
+            top-most layer, no matter what else (like the PGA sheet) is open. */}
+        {showJoinRequests && createPortal((
+          <div style={{ position: 'fixed', inset: 0, zIndex: 20000 }}>
+            <div className="ve-backdrop" style={{ zIndex: 20000 }} onClick={() => { if (!joinRequestActionId) setShowJoinRequests(false); }} />
+            <div className="ve-sheet" style={{ zIndex: 20001 }}>
               <div className="ve-sheet-handle" />
               <div className="ve-sheet-header">
                 <h3 className="ve-sheet-title">Pending Join Requests{joinRequests.length > 0 ? ` (${joinRequests.length})` : ''}</h3>
@@ -2336,8 +2346,8 @@ const handleCopy = async (text: string, field: string) => {
                 <div className="ve-sheet-close" style={{ marginTop: 0 }} onClick={() => { if (!joinRequestActionId) setShowJoinRequests(false); }}>Close</div>
               </div>
             </div>
-          </>
-        )}
+          </div>
+        ), document.body)}
 
         {/* ══ Launch Round Confirmation ══
             NOTE: rendered via createPortal straight to document.body with an
@@ -3195,6 +3205,18 @@ const handleCopy = async (text: string, field: string) => {
                 <div className="ve-launch-btn ve-launch-btn--arrow" style={{ opacity: actionLoading ? 0.6 : 1 }} onClick={() => { if (!actionLoading) setShowLaunchRoundConfirm(true); }}>
                   {actionLoading ? 'Launching…' : `Launch Round ${(apiEvent?.completed_rounds ?? 0) + 1} →`}
                 </div>
+                {/* ★ NEW: Pending Join Requests — mirrors the Requests button shown
+                    on the main event screen, so hosts can act on join requests
+                    without leaving the Proposed Group Allocations sheet. */}
+                {joinRequests.length > 0 && (
+                  <div
+                    className="ve-launch-btn ve-launch-btn--arrow"
+                    style={{ background: '#FCB040', boxShadow: '0 6px 15px rgba(252,176,64,0.35)', marginTop: 10 }}
+                    onClick={() => { setShowJoinRequests(true); loadJoinRequests(); }}
+                  >
+                    Requests ({joinRequests.length}) →
+                  </div>
+                )}
                 <div className="ve-end-btn" onClick={() => setShowPGA(false)}>End Event</div>
               </div>
             </div>
