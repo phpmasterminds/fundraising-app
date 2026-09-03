@@ -21,7 +21,7 @@ workflows:
           npm install
       - name: Build web assets
         script: |
-          npm run build
+          ionic build
       - name: Sync Capacitor iOS
         script: |
           npx cap sync ios
