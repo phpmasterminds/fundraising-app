@@ -25,7 +25,7 @@ workflows:
       - name: Set iOS build number
         script: |
           cd ios/App
-          agvtool new-version -all 2
+          agvtool new-version -all 3
       - name: Sync Capacitor iOS
         script: |
           npx cap sync ios
