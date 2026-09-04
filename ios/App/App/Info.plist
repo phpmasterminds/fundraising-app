@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
         <string>Fundraising</string>
+	<key>NSCameraUsageDescription</key>
+	<string>OneHive needs access to your camera to take photos and upload them.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

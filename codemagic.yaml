@@ -22,6 +22,10 @@ workflows:
       - name: Build web assets
         script: |
           ionic build
+      - name: Set iOS build number
+        script: |
+          cd ios/App
+          agvtool new-version -all 2
       - name: Sync Capacitor iOS
         script: |
           npx cap sync ios
