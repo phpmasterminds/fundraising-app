@@ -95,6 +95,7 @@ workflows:
       - name: Build Android App Bundle
         script: |
           cd android
+          chmod +x gradlew
           ./gradlew bundleRelease
 
     artifacts:
