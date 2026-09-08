@@ -37,7 +37,6 @@ yarn-error.log*
 
 # ── Ionic / Capacitor ──────────────────
 # Android native project
-/android
 
 # Capacitor plugins
 /capacitor-cordova-android-plugins
