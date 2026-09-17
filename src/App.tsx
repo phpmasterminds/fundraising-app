@@ -26,6 +26,7 @@ import Register     from './pages/common/register/Register';
 import QrScan       from './pages/common/qr/QrScan';
 import ForgotPassword from './pages/common/forgot/ForgotPassword';
 import ResetPassword from './pages/common/reset/ResetPassword';
+import PrivacyPolicy from './pages/common/privacy/PrivacyPolicy';
 import DonorProfile from './pages/donor/DonorProfile';
 import EventList    from './pages/host/EventList';
 import CreateEvent  from './pages/host/CreateEvent';
@@ -166,6 +167,7 @@ const App: React.FC = () => {
 		  <Route path="/join-event" component={EventView} exact />
           <Route exact path="/forgot-password" component={ForgotPassword} />
 		  <Route path="/reset-password" component={ResetPassword} exact />
+		  <Route path="/privacy-policy" component={PrivacyPolicy} exact />
 
           {/* ── Host protected routes ── */}
           <Route path="/events" exact>
