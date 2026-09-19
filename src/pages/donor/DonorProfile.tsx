@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react';
 import './DonorProfile.css';
 import DonorHeader from '../../components/DonorHeader';
 import { joinEvent, getDonorEventDetail, getJoinStatus } from '../../services/donorEvents';
-import { updateProfile, changePassword } from '../../services/profileService';
+import { updateProfile, changePassword, deleteAccount } from '../../services/profileService';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
 import { clearSession } from '../../services/auth'; // adjust relative path
 import { useLockedBack } from '../../components/EventLockGate';
@@ -129,6 +129,11 @@ const DonorProfile: React.FC = () => {
   // ── Email tooltip ─────────────────────────────────
   const [showEmailTip, setShowEmailTip] = useState(false);
 
+  // ── Delete account modal state ────────────────────
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteError,     setDeleteError]     = useState<string | null>(null);
+  const [deleting,        setDeleting]        = useState(false);
+
 const handleEmailInfoClick = () => {
   setShowEmailTip(true);
 
@@ -248,6 +253,27 @@ const handleEmailInfoClick = () => {
       setPwError(err.message ?? 'Something went wrong');
     } finally {
       setPwSaving(false);
+    }
+  };
+
+  // ── Delete account ─────────────────────────────────
+  const openDeleteModal = () => {
+    setShowDeleteModal(true);
+    setDeleteError(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      localStorage.clear();
+      await clearSession();
+      router.push('/join', 'root');
+    } catch (err: any) {
+      setDeleteError(err.message ?? 'Something went wrong');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -413,6 +439,17 @@ const handleEmailInfoClick = () => {
 				</div>
             )}
 
+            {/* Delete Account — only outside join mode */}
+            {!isJoin && (
+              <div className="input-group">
+                <label className="hp-label">Delete Account</label>
+                <div className="hp-input-box hp-input-box--action" onClick={openDeleteModal}>
+                  <span className="hp-pw-dots" style={{ color: '#E15554' }}>Permanently delete your account</span>
+                  <span className="hp-change-pw" style={{ color: '#E15554' }}>Delete</span>
+                </div>
+              </div>
+            )}
+
             {saveError && <p className="msg msg--error">{saveError}</p>}
             {saveOk    && <p className="msg msg--ok">Profile saved!</p>}
 
@@ -472,6 +509,44 @@ const handleEmailInfoClick = () => {
                 disabled={pwSaving}
               >
                 {pwSaving ? 'Updating…' : 'Update Password'}
+              </button>
+
+            </div>
+          </div>
+        )}
+
+        {/* ── Delete Account Modal ── */}
+        {showDeleteModal && (
+          <div className="pw-modal-overlay" onClick={() => !deleting && setShowDeleteModal(false)}>
+            <div className="pw-modal" onClick={e => e.stopPropagation()}>
+
+              <div className="pw-modal-handle" />
+              <h3 className="pw-modal-title">Delete Account</h3>
+
+              <p className="msg">
+                This permanently removes your personal information. Records
+                for events you've taken part in are kept in anonymized form
+                for financial and legal compliance. This cannot be undone.
+              </p>
+
+              {deleteError && <p className="msg msg--error">{deleteError}</p>}
+
+              <button
+                className="btn save"
+                style={{ background: '#E15554' }}
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Yes, Delete My Account'}
+              </button>
+
+              <button
+                className="btn save"
+                style={{ background: 'transparent', color: '#666', marginTop: 8 }}
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+              >
+                Cancel
               </button>
 
             </div>

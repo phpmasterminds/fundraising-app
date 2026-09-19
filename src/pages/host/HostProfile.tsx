@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import './HostProfile.css';
 import HostHeader from '../../components/HostHeader';
 import usePhotoUpload from '../../hooks/usePhotoUpload';
-import { updateProfile, changePassword, getHostStats, HostStats } from '../../services/profileService';
+import { updateProfile, changePassword, deleteAccount, getHostStats, HostStats } from '../../services/profileService';
 import { clearSession } from '../../services/auth'; // adjust relative path
 
 const HostProfile: React.FC = () => {
@@ -40,6 +40,11 @@ const HostProfile: React.FC = () => {
   const [pwSaving,    setPwSaving]    = useState(false);
   const [pwSuccess,   setPwSuccess]   = useState(false);
   const [showEmailTip, setShowEmailTip] = useState(false);
+
+  // ── Delete account modal state ────────────────────────
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteError,     setDeleteError]     = useState<string | null>(null);
+  const [deleting,        setDeleting]        = useState(false);
 
 const handleEmailInfoClick = () => {
   setShowEmailTip(true);
@@ -151,6 +156,27 @@ const handleEmailInfoClick = () => {
       setPwError(err.message ?? 'Something went wrong');
     } finally {
       setPwSaving(false);
+    }
+  };
+
+  // ── Delete account ─────────────────────────────────────
+  const openDeleteModal = () => {
+    setShowDeleteModal(true);
+    setDeleteError(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      localStorage.clear();
+      await clearSession();
+      router.push('/join', 'root');
+    } catch (err: any) {
+      setDeleteError(err.message ?? 'Something went wrong');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -301,6 +327,15 @@ const handleEmailInfoClick = () => {
               </div>
             </div>
 
+            {/* Delete Account */}
+            <div className="hp-field">
+              <label className="hp-label">Delete Account</label>
+              <div className="hp-input-box hp-input-box--action" onClick={openDeleteModal}>
+                <span className="hp-pw-dots" style={{ color: '#E15554' }}>Permanently delete your account</span>
+                <span className="hp-change-pw" style={{ color: '#E15554' }}>Delete</span>
+              </div>
+            </div>
+
             {saveError && <p className="hp-msg hp-msg--error">{saveError}</p>}
             {saveOk    && <p className="hp-msg hp-msg--ok">Profile saved!</p>}
 
@@ -353,6 +388,44 @@ const handleEmailInfoClick = () => {
                 disabled={pwSaving}
               >
                 {pwSaving ? 'Updating…' : 'Update Password'}
+              </button>
+
+            </div>
+          </div>
+        )}
+
+        {/* ── Delete Account Modal ── */}
+        {showDeleteModal && (
+          <div className="hp-modal-overlay" onClick={() => !deleting && setShowDeleteModal(false)}>
+            <div className="hp-modal" onClick={e => e.stopPropagation()}>
+
+              <div className="hp-modal-handle" />
+              <h3 className="hp-modal-title">Delete Account</h3>
+
+              <p className="hp-msg">
+                This permanently removes your personal information. Records
+                for past events and donations are kept in anonymized form
+                for financial and legal compliance. This cannot be undone.
+              </p>
+
+              {deleteError && <p className="hp-msg hp-msg--error">{deleteError}</p>}
+
+              <button
+                className="hp-save-btn"
+                style={{ background: '#E15554' }}
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Yes, Delete My Account'}
+              </button>
+
+              <button
+                className="hp-save-btn"
+                style={{ background: 'transparent', color: '#666', marginTop: 8 }}
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+              >
+                Cancel
               </button>
 
             </div>

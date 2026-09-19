@@ -33,7 +33,7 @@ workflows:
       - name: Set iOS build number
         script: |
           cd ios/App
-          agvtool new-version -all 4
+          agvtool new-version -all 5
 
       - name: Sync Capacitor iOS
         script: |
@@ -93,6 +93,10 @@ workflows:
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
 
+      - name: Set Android version code
+        script: |
+          sed -i 's/versionCode [0-9]*/versionCode 2/' android/app/build.gradle
+          
       - name: Build Android App Bundle
         script: |
           cd android

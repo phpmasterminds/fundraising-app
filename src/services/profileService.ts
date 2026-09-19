@@ -76,3 +76,16 @@ export const getHostStats = async (): Promise<HostStats> => {
 
   return res.json();
 };
+
+// ── Delete account ────────────────────────────────────────
+export const deleteAccount = async (): Promise<void> => {
+  const res = await fetch(`${API}/account`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message ?? 'Failed to delete account');
+  }
+};
