@@ -64,7 +64,7 @@ workflows:
         submit_to_app_store: false
 
 
-  android-workflow:
+    android-workflow:
     name: OneHive Android Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
@@ -95,8 +95,21 @@ workflows:
 
       - name: Set Android version code
         script: |
-          sed -i 's/versionCode [0-9]*/versionCode 2/' android/app/build.gradle
-          
+          python3 - <<'PY'
+          path = "android/app/build.gradle"
+
+          with open(path, "r") as f:
+              content = f.read()
+
+          import re
+          content = re.sub(r'versionCode\s+\d+', 'versionCode 2', content)
+
+          with open(path, "w") as f:
+              f.write(content)
+
+          print("Android versionCode set to 2")
+          PY
+
       - name: Build Android App Bundle
         script: |
           cd android
