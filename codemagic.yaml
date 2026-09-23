@@ -111,10 +111,11 @@ workflows:
           print("Android versionCode set to 4")
           PY
           
-      - name: Build Android App Bundle
+      - name: Build Android APK and App Bundle
         script: |
           cd android
           chmod +x gradlew
+          ./gradlew assembleRelease
           ./gradlew bundleRelease
 
     artifacts:
