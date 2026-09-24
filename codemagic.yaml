@@ -103,12 +103,12 @@ workflows:
           with open(path, "r") as f:
               content = f.read()
 
-          content = re.sub(r'versionCode\s+\d+', 'versionCode 4', content)
+          content = re.sub(r'versionCode\s+\d+', 'versionCode 5', content)
 
           with open(path, "w") as f:
               f.write(content)
 
-          print("Android versionCode set to 4")
+          print("Android versionCode set to 5")
           PY
           
       - name: Build Android APK and App Bundle
