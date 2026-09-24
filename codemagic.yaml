@@ -109,21 +109,19 @@ workflows:
           with open(path, "r") as f:
               content = f.read()
 
-          content = re.sub(r'versionCode\s+\d+', 'versionCode 6', content)
+          content = re.sub(r'versionCode\s+\d+', 'versionCode 7', content)
 
           with open(path, "w") as f:
               f.write(content)
 
-          print("Android versionCode set to 6")
+          print("Android versionCode set to 7")
           PY
           
-      - name: Build Android APK and App Bundle
+      - name: Build Android App Bundle
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
           ./gradlew bundleRelease
 
     artifacts:
       - android/app/build/outputs/**/*.aab
-      - android/app/build/outputs/**/*.apk
