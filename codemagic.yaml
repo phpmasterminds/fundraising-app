@@ -12,7 +12,10 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.onehive.app
-
+      
+      groups:
+        - production
+        
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -72,7 +75,10 @@ workflows:
     environment:
       android_signing:
         - onehive_android
-
+      
+      groups:
+        - production
+        
       node: latest
       java: 21
 
@@ -103,12 +109,12 @@ workflows:
           with open(path, "r") as f:
               content = f.read()
 
-          content = re.sub(r'versionCode\s+\d+', 'versionCode 5', content)
+          content = re.sub(r'versionCode\s+\d+', 'versionCode 5.1', content)
 
           with open(path, "w") as f:
               f.write(content)
 
-          print("Android versionCode set to 5")
+          print("Android versionCode set to 5.1")
           PY
           
       - name: Build Android APK and App Bundle
